@@ -112,17 +112,75 @@ print("missing")
 '
 }
 
-plugin_cache_state() {
-  local plugin_name="$1"
-  local manifest contents
-  for manifest in "$codex_home"/plugins/cache/**/.codex-plugin/plugin.json(N); do
-    contents="$(<"$manifest")"
-    if [[ "$contents" == *"\"name\": \"$plugin_name\""* ]]; then
-      print "installed"
-      return 0
-    fi
-  done
-  print "missing"
+target_health_report() {
+  python3 - "$codex_home" "$repository_root/plugins/personal-workflows" <<'PYTHON'
+from __future__ import print_function
+
+import json
+import sys
+from pathlib import Path
+
+
+codex_home = Path(sys.argv[1])
+plugin_root = Path(sys.argv[2])
+cache_root = codex_home / "plugins" / "cache"
+healthy = True
+installed_plugins = set()
+malformed = []
+
+if cache_root.exists():
+    for manifest in cache_root.glob("**/.codex-plugin/plugin.json"):
+        try:
+            document = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError, UnicodeError):
+            malformed.append(manifest)
+            continue
+        if isinstance(document, dict) and isinstance(document.get("name"), str):
+            installed_plugins.add(document["name"])
+
+for manifest in malformed:
+    print("Plugin cache: malformed manifest: {0}".format(manifest))
+    healthy = False
+
+for plugin_name, label in (("superpowers", "Superpowers"), ("personal-workflows", "personal-workflows")):
+    if plugin_name in installed_plugins:
+        print("{0}: installed".format(label))
+    else:
+        print("{0}: missing".format(label))
+        healthy = False
+
+expected_guidance = (plugin_root / "profile" / "global-agents-block.md").read_bytes()
+guidance_path = codex_home / "AGENTS.md"
+if not guidance_path.exists():
+    print("Guidance: missing")
+    healthy = False
+else:
+    guidance = guidance_path.read_bytes()
+    start = b"<!-- personal-workflows:start -->"
+    end = b"<!-- personal-workflows:end -->"
+    position = guidance.find(start)
+    if guidance.count(start) != 1 or guidance.count(end) != 1 or position < 0:
+        print("Guidance: drift")
+        healthy = False
+    elif guidance[position : position + len(expected_guidance)] == expected_guidance:
+        print("Guidance: installed")
+    else:
+        print("Guidance: drift")
+        healthy = False
+
+for source in sorted((plugin_root / "codex-agents").glob("*.toml")):
+    destination = codex_home / "agents" / source.name
+    if not destination.exists():
+        print("Agent {0}: missing".format(source.name))
+        healthy = False
+    elif destination.read_bytes() == source.read_bytes():
+        print("Agent {0}: installed".format(source.name))
+    else:
+        print("Agent {0}: drift".format(source.name))
+        healthy = False
+
+raise SystemExit(0 if healthy else 1)
+PYTHON
 }
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -155,10 +213,16 @@ print "Codex command: $codex_command"
 
 if [[ "$mode" == "check" || "$mode" == "dry-run" ]]; then
   print "Marketplace: unknown (Codex is not invoked in $mode mode)."
-  print "Superpowers: $(plugin_cache_state superpowers) in $codex_home"
-  print "personal-workflows: $(plugin_cache_state personal-workflows) in $codex_home"
+  health_status=0
+  health_report="$(target_health_report)" || health_status=$?
+  print -r -- "$health_report"
   if [[ "$mode" == "check" ]]; then
-    print "Check mode: no changes will be made."
+    if (( health_status == 0 )); then
+      print "Check mode: target home is healthy; no changes will be made."
+    else
+      print "Check mode: target home is incomplete or drifted. Run bootstrap after reviewing the report."
+      exit "$health_status"
+    fi
   else
     print "Dry run: would install or verify Superpowers, register this marketplace, install personal-workflows, and run the profile installer."
   fi

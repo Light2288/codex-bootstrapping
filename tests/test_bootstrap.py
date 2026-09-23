@@ -70,6 +70,24 @@ class BootstrapTest(unittest.TestCase):
             homes = [entry["codex_home"] for entry in entries]
         return result, calls, homes
 
+    def install_complete_profile(self, home, minified_superpowers=False):
+        result = subprocess.run(
+            [sys.executable, str(PROFILE_INSTALLER), "--codex-home", str(home), "--install"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        cache = home / "plugins" / "cache" / "openai-curated-remote"
+        manifests = {
+            "superpowers": '{"name":"superpowers"}' if minified_superpowers else json.dumps({"name": "superpowers"}),
+            "personal-workflows": json.dumps({"name": "personal-workflows"}, indent=2),
+        }
+        for name, contents in manifests.items():
+            manifest = cache / name / "1.0.0" / ".codex-plugin" / "plugin.json"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text(contents, encoding="utf-8")
+
     def test_bundled_codex_is_used_when_path_and_override_are_absent(self):
         """Removing bundled discovery would make a bundled-only Codex install unusable."""
         with tempfile.TemporaryDirectory() as directory:
@@ -86,7 +104,7 @@ class BootstrapTest(unittest.TestCase):
             )
             bundled.chmod(0o755)
             result = subprocess.run(
-                ["zsh", str(SCRIPT), "--codex-home", str(temporary / "codex-home"), "--check"],
+                ["zsh", str(SCRIPT), "--codex-home", str(temporary / "codex-home"), "--dry-run"],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -119,15 +137,15 @@ class BootstrapTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("https://developers.openai.com/codex/", result.stderr)
 
-    def test_check_and_dry_run_do_not_write_a_codex_home_or_run_mutating_cli_commands(self):
-        """Turning either inspection mode into an install would violate its safety contract."""
+    def test_inspection_modes_do_not_write_a_codex_home_or_invoke_codex(self):
+        """Inspection must not risk a Codex startup write in the caller's home."""
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)
             for mode in ("--check", "--dry-run"):
                 with self.subTest(mode=mode):
                     result, calls, _ = self.run_bootstrap(temporary, mode)
 
-                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.returncode, 1 if mode == "--check" else 0, result.stderr)
                     self.assertFalse((temporary / "codex-home").exists())
                     self.assertEqual(calls, [])
                     self.assertIn("Superpowers: missing", result.stdout)
@@ -205,15 +223,12 @@ class BootstrapTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertNotIn(["plugin", "marketplace", "add", str(ROOT)], calls)
 
-    def test_check_reports_target_home_dependency_state_without_starting_codex(self):
-        """Starting Codex during inspection could mutate a caller's active home."""
+    def test_check_accepts_a_complete_target_home_with_minified_and_pretty_manifests(self):
+        """JSON formatting differences must not make a healthy installation fail."""
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)
-            cache = temporary / "codex-home" / "plugins" / "cache" / "openai-curated-remote"
-            for name in ("superpowers", "personal-workflows"):
-                manifest = cache / name / "1.0.0" / ".codex-plugin" / "plugin.json"
-                manifest.parent.mkdir(parents=True)
-                manifest.write_text(json.dumps({"name": name}), encoding="utf-8")
+            home = temporary / "codex-home"
+            self.install_complete_profile(home, minified_superpowers=True)
 
             result, calls, _ = self.run_bootstrap(temporary, "--check")
 
@@ -221,6 +236,57 @@ class BootstrapTest(unittest.TestCase):
             self.assertEqual(calls, [])
             self.assertIn("Superpowers: installed", result.stdout)
             self.assertIn("personal-workflows: installed", result.stdout)
+
+    def test_check_rejects_drifted_guidance_or_agent_without_invoking_codex(self):
+        """A success status despite changed managed files would hide a broken profile."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            home = temporary / "codex-home"
+            self.install_complete_profile(home)
+            agent = home / "agents" / "review-spec.toml"
+            agent.write_text(agent.read_text(encoding="utf-8") + "# drift\n", encoding="utf-8")
+
+            result, calls, _ = self.run_bootstrap(temporary, "--check")
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertEqual(calls, [])
+            self.assertIn("Agent review-spec.toml: drift", result.stdout)
+
+    def test_check_rejects_drifted_guidance_without_invoking_codex(self):
+        """A changed marked guidance block must make the profile health check fail."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            home = temporary / "codex-home"
+            self.install_complete_profile(home)
+            guidance = home / "AGENTS.md"
+            guidance.write_text(
+                guidance.read_text(encoding="utf-8").replace(
+                    "<!-- personal-workflows:start -->",
+                    "<!-- personal-workflows:start -->\n# drift",
+                ),
+                encoding="utf-8",
+            )
+
+            result, calls, _ = self.run_bootstrap(temporary, "--check")
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertEqual(calls, [])
+            self.assertIn("Guidance: drift", result.stdout)
+
+    def test_check_rejects_a_malformed_cached_manifest_without_invoking_codex(self):
+        """Treating invalid cache JSON as absent could conceal a corrupt plugin installation."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            home = temporary / "codex-home"
+            self.install_complete_profile(home)
+            manifest = home / "plugins" / "cache" / "openai-curated-remote" / "superpowers" / "1.0.0" / ".codex-plugin" / "plugin.json"
+            manifest.write_text('{"name":', encoding="utf-8")
+
+            result, calls, _ = self.run_bootstrap(temporary, "--check")
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertEqual(calls, [])
+            self.assertIn("Plugin cache: malformed manifest", result.stdout)
 
 
 if __name__ == "__main__":

@@ -23,6 +23,12 @@ runs the copied profile installer with `--install` and `--check`. It never
 invokes provider configuration. A pre-existing `personal` marketplace pointing
 to another path is a conflict that must be resolved manually.
 
+`--check` is a strict target-home health check: it verifies semantic plugin
+manifests in the target cache, the exact managed guidance block, and each
+managed agent's contents without starting Codex. It exits nonzero when any
+required artifact is missing, malformed, or drifted. `--dry-run` remains a
+non-writing plan and may describe missing components without failing.
+
 ## Updating
 
 Pull the desired revision and rerun the bootstrap. The marketplace entry,

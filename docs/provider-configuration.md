@@ -34,10 +34,13 @@ parsed with `tomllib` before it is written.
 
 ## Credential storage
 
-The default `keychain` mode reads the token from a macOS Keychain item through
-Codex's command-backed provider authentication. The key is entered with hidden
-terminal input only after confirmation. It is not written to TOML, the preview,
-or the wizard's output.
+The default `keychain` mode stores the token with the bundled macOS
+Security.framework helper, then lets Codex retrieve it through command-backed
+provider authentication. The key is entered with hidden terminal input only
+after confirmation and is sent to the helper over standard input. It is not
+written to TOML, the preview, command arguments, or the wizard's output. If
+Security.framework cannot be loaded, the wizard stops before changing either
+the Keychain or `config.toml`.
 
 `environment` mode instead writes the provider's `env_key` name into TOML; it
 does not write a token or modify shell startup files. Make the named environment

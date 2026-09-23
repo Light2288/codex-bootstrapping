@@ -10,7 +10,6 @@ from __future__ import print_function
 
 import argparse
 import datetime
-import json
 import os
 import re
 import shutil
@@ -139,6 +138,52 @@ def _root_assignment_pattern(key):
     )
 
 
+def _decode_toml_basic_key(value):
+    """Decode a single-line TOML basic string used as a table key."""
+    if len(value) < 2 or value[0] != '"' or value[-1] != '"':
+        return None
+    escaped_values = {
+        "b": "\b",
+        "t": "\t",
+        "n": "\n",
+        "f": "\f",
+        "r": "\r",
+        '"': '"',
+        "\\": "\\",
+    }
+    output = []
+    index = 1
+    end = len(value) - 1
+    while index < end:
+        character = value[index]
+        if character != "\\":
+            if ord(character) < 32:
+                return None
+            output.append(character)
+            index += 1
+            continue
+        index += 1
+        if index == end:
+            return None
+        escape = value[index]
+        if escape in escaped_values:
+            output.append(escaped_values[escape])
+            index += 1
+            continue
+        if escape not in ("u", "U"):
+            return None
+        digits = 4 if escape == "u" else 8
+        hexadecimal = value[index + 1 : index + 1 + digits]
+        if len(hexadecimal) != digits or not re.match(r"^[0-9A-Fa-f]+$", hexadecimal):
+            return None
+        codepoint = int(hexadecimal, 16)
+        if codepoint > 0x10FFFF or 0xD800 <= codepoint <= 0xDFFF:
+            return None
+        output.append(chr(codepoint))
+        index += digits + 1
+    return "".join(output)
+
+
 def _parse_dotted_keys(value):
     """Parse the TOML table-key subset needed to identify managed tables."""
     index = 0
@@ -165,10 +210,10 @@ def _parse_dotted_keys(value):
                 index += 1
             else:
                 return None
-            try:
-                keys.append(json.loads(value[start:index]))
-            except ValueError:
+            decoded = _decode_toml_basic_key(value[start:index])
+            if decoded is None:
                 return None
+            keys.append(decoded)
         elif value[index] == "'":
             index += 1
             start = index

@@ -6,7 +6,8 @@ setopt errexit nounset pipefail
 
 script_dir=${0:A:h}
 transformer="$script_dir/provider_config.py"
-security_command="${CODEX_PROVIDER_SECURITY_COMMAND:-/usr/bin/security}"
+keychain_helper="$script_dir/keychain_helper.py"
+keychain_helper_override="${CODEX_PROVIDER_KEYCHAIN_HELPER:-}"
 config_path="${CODEX_HOME:-$HOME/.codex}/config.toml"
 mode="apply"
 smoke_test=false
@@ -87,6 +88,14 @@ prompt_default() {
   REPLY="${response:-$default_value}"
 }
 
+run_keychain_helper() {
+  if [[ -n "$keychain_helper_override" ]]; then
+    "$keychain_helper_override" "$@"
+  else
+    python3 "$keychain_helper" "$@"
+  fi
+}
+
 prompt_default "Provider ID" "$provider_id"; provider_id="$REPLY"
 prompt_default "Display name" "$display_name"; display_name="$REPLY"
 prompt_default "API base URL" "$base_url"; base_url="$REPLY"
@@ -122,15 +131,18 @@ IFS= read -r confirmation
 [[ "$confirmation" == "y" || "$confirmation" == "Y" ]] || { print "No changes made."; exit 0; }
 
 if [[ "$auth_mode" == "keychain" ]]; then
-  [[ -x "$security_command" ]] || { print -u2 "Keychain command is not executable"; exit 1; }
+  service="codex-provider-$provider_id"
+  if ! run_keychain_helper check --service "$service" --account "codex"; then
+    print -u2 "Keychain helper is unavailable; no files were changed"
+    exit 1
+  fi
   print -n "API key (stored only in macOS Keychain; input hidden): "
   IFS= read -r -s api_key
   print ""
   [[ -n "$api_key" ]] || { print -u2 "API key cannot be empty"; exit 1; }
-  service="codex-provider-$provider_id"
   prior_credential=""
   had_prior_credential=false
-  if prior_credential=$("$security_command" find-generic-password -s "$service" -a "codex" -w 2>/dev/null); then
+  if prior_credential=$(run_keychain_helper get --service "$service" --account "codex"); then
     had_prior_credential=true
   else
     lookup_status=$?
@@ -139,7 +151,7 @@ if [[ "$auth_mode" == "keychain" ]]; then
       exit 1
     fi
   fi
-  if ! print -rn -- "$api_key" | "$security_command" add-generic-password -U -s "$service" -a "codex" -w >/dev/null; then
+  if ! print -rn -- "$api_key" | run_keychain_helper set --service "$service" --account "codex"; then
     unset api_key
     print -u2 "Could not store the API key in macOS Keychain"
     exit 1
@@ -152,12 +164,12 @@ python3 "$transformer" "${transformer_args[@]}" || config_status=$?
 if (( config_status != 0 )); then
   if [[ "$auth_mode" == "keychain" ]]; then
     if [[ "$had_prior_credential" == true ]]; then
-      print -rn -- "$prior_credential" | "$security_command" add-generic-password -U -s "$service" -a "codex" -w >/dev/null || {
+      print -rn -- "$prior_credential" | run_keychain_helper set --service "$service" --account "codex" || {
         print -u2 "Configuration failed and the prior Keychain credential could not be restored"
         exit "$config_status"
       }
     else
-      "$security_command" delete-generic-password -s "$service" -a "codex" >/dev/null 2>&1 || {
+      run_keychain_helper delete --service "$service" --account "codex" || {
         print -u2 "Configuration failed and the new Keychain credential could not be removed"
         exit "$config_status"
       }

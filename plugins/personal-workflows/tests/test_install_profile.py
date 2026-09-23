@@ -1,15 +1,23 @@
+import contextlib
+import io
 import json
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN_ROOT / "scripts"))
 
-from install_profile import install_agent, install_profile, merge_managed_block
+from install_profile import (
+    install_agent,
+    install_profile,
+    main as install_profile_main,
+    merge_managed_block,
+)
 
 
 START = "<!-- personal-workflows:start -->"
@@ -176,15 +184,55 @@ class ProfileInstallerTest(unittest.TestCase):
             self.assertIn("not allowed with argument", result.stderr)
             self.assertFalse(codex_home.exists())
 
-    def test_cli_without_mode_retains_default_install_behavior(self):
+    def test_cli_requires_an_explicit_mode_without_writing(self):
         with tempfile.TemporaryDirectory() as directory:
             codex_home = Path(directory) / "codex"
 
             result = self.run_installer(codex_home)
 
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("one of the arguments --install --check is required", result.stderr)
+            self.assertFalse(codex_home.exists())
+
+    def test_cli_without_mode_does_not_target_the_default_codex_home(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "home"
+            home.mkdir()
+
+            with contextlib.redirect_stderr(io.StringIO()), patch(
+                "install_profile.Path.home", return_value=home
+            ), patch.object(sys, "argv", ["install_profile.py"]):
+                with self.assertRaises(SystemExit) as result:
+                    install_profile_main()
+
+            self.assertEqual(result.exception.code, 2)
+            self.assertFalse((home / ".codex").exists())
+
+    def test_cli_explicit_install_backs_up_replaced_guidance_and_agent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = Path(directory) / "codex"
+            managed_agent = codex_home / "agents" / "review-spec.toml"
+            original_guidance = f"before\n{START}\nold guidance\n{END}\nafter\n"
+            original_agent = f'{AGENT_HEADER}name = "old-review-spec"\n'
+            codex_home.mkdir()
+            (codex_home / "AGENTS.md").write_text(original_guidance)
+            managed_agent.parent.mkdir()
+            managed_agent.write_text(original_agent)
+
+            result = self.run_installer(codex_home, "--install")
+
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertTrue((codex_home / "AGENTS.md").is_file())
-            self.assertTrue((codex_home / "agents" / "review-spec.toml").is_file())
+            self.assertIn(START, (codex_home / "AGENTS.md").read_text())
+            self.assertEqual(
+                managed_agent.read_text(),
+                (PLUGIN_ROOT / "codex-agents" / "review-spec.toml").read_text(),
+            )
+            guidance_backups = list(codex_home.glob("AGENTS.md.backup.*"))
+            agent_backups = list(managed_agent.parent.glob("review-spec.toml.backup.*"))
+            self.assertEqual(len(guidance_backups), 1)
+            self.assertEqual(len(agent_backups), 1)
+            self.assertEqual(guidance_backups[0].read_text(), original_guidance)
+            self.assertEqual(agent_backups[0].read_text(), original_agent)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@
 import argparse
 import json
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -38,8 +39,22 @@ def merge_managed_block(existing: str, managed: str) -> str:
     return f"{existing[:start]}{managed}{existing[block_end:]}"
 
 
+def _backup_existing(destination: Path):
+    """Copy an existing destination to a collision-safe sibling backup."""
+    if not destination.exists():
+        return None
+
+    sequence = 1
+    while True:
+        backup = destination.with_name(f"{destination.name}.backup.{sequence}")
+        if not backup.exists():
+            shutil.copyfile(destination, backup)
+            return backup
+        sequence += 1
+
+
 def _replace_atomically(destination: Path, contents: str) -> None:
-    """Write contents to a sibling, then atomically replace the destination."""
+    """Back up an existing destination, then atomically replace it."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = None
     try:
@@ -50,6 +65,7 @@ def _replace_atomically(destination: Path, contents: str) -> None:
             temporary_file.flush()
             os.fsync(temporary_file.fileno())
             temporary_path = Path(temporary_file.name)
+        _backup_existing(destination)
         temporary_path.replace(destination)
     except Exception:
         if temporary_path is not None and temporary_path.exists():
@@ -107,7 +123,7 @@ def install_profile(codex_home: Path, plugin_root: Path, check_only: bool) -> di
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--codex-home", type=Path, default=Path.home() / ".codex")
-    mode = parser.add_mutually_exclusive_group()
+    mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--install", action="store_true")
     mode.add_argument("--check", action="store_true", dest="check_only")
     arguments = parser.parse_args()

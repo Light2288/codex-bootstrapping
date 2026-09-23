@@ -44,8 +44,8 @@ EXPECTED_PUBLIC_METADATA = {
 }
 LIKELY_CREDENTIAL_FILENAMES = {".env", ".env.local", "credentials", "credentials.json"}
 LIKELY_CREDENTIAL_VALUE = re.compile(
-    r"\\b(?:sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{36}|"
-    r"github_pat_[A-Za-z0-9_]{22,}|xox[bp]-[A-Za-z0-9-]{20,})\\b"
+    r"\b(?:sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{36}|"
+    r"github_pat_[A-Za-z0-9_]{22,}|xox[bp]-[A-Za-z0-9-]{20,})\b"
 )
 
 
@@ -151,6 +151,18 @@ class PublicDistributionTest(unittest.TestCase):
                 },
             )
             self.assertFalse(codex_home.exists())
+
+    def test_credential_detector_matches_likely_credential_values(self):
+        values = (
+            "sk-abcdefghijklmnopqrstuvwxyz123456",
+            "ghp_abcdefghijklmnopqrstuvwxyz1234567890",
+            "github_pat_abcdefghijklmnopqrstuvwxyz",
+            "xoxb-1234567890-abcdefghijklmnopqrstuvwxyz",
+        )
+
+        for value in values:
+            with self.subTest(value=value):
+                self.assertIsNotNone(LIKELY_CREDENTIAL_VALUE.search(value))
 
     def test_distribution_declares_no_figma_integration_or_likely_credentials(self):
         json_paths = [MARKETPLACE_PATH, MANIFEST_PATH]

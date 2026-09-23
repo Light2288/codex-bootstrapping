@@ -10,7 +10,7 @@ profile_installer="$repository_root/plugins/personal-workflows/scripts/install_p
 codex_home="${CODEX_HOME:-$HOME/.codex}"
 mode="install"
 official_install_url="https://developers.openai.com/codex/"
-official_installer_url="${CODEX_BOOTSTRAP_INSTALL_URL:-https://github.com/openai/codex/releases/latest/download/codex-installer.sh}"
+official_installer_url="https://chatgpt.com/codex/install.sh"
 bundled_codex="${CODEX_BOOTSTRAP_BUNDLED_CODEX:-/Applications/ChatGPT.app/Contents/Resources/codex}"
 
 usage() {
@@ -195,13 +195,13 @@ if ! codex_command=$(resolve_codex); then
   if [[ "$mode" != "install" ]]; then
     exit 1
   fi
-  printf 'Download and run the official Codex installer from %s? [y/N]: ' "$official_install_url"
+  printf 'Download and run the official Codex installer from %s? [y/N]: ' "$official_installer_url"
   IFS= read -r confirmation
   [[ "$confirmation" == "y" || "$confirmation" == "Y" ]] || { print "No changes made."; exit 1; }
   installer_path="$(mktemp -t codex-bootstrap-installer.XXXXXX)"
   trap 'rm -f -- "$installer_path"' EXIT
   curl -fsSL "$official_installer_url" -o "$installer_path"
-  zsh "$installer_path"
+  sh "$installer_path"
   codex_command="$(resolve_codex)" || {
     print -u2 "Codex installation did not make a Codex command available. Rerun after completing the official installer."
     exit 1

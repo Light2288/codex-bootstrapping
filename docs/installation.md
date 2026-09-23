@@ -11,11 +11,13 @@ zsh scripts/bootstrap-macos.zsh --dry-run
 ```
 
 Use `zsh scripts/bootstrap-macos.zsh` only after reviewing those reports. The
-script asks for confirmation before it invokes any Codex plugin command or the
-profile installer's explicit `--install` mode. It locates `codex` from
-`CODEX_BOOTSTRAP_CODEX_CMD`, `PATH`, or the ChatGPT application's bundled
-binary. If none is available, it links to the official Codex installation page
-and does not install anything in check or dry-run mode.
+script may inspect the registered marketplaces before confirmation so it can
+refuse a naming conflict, but it asks before every mutating Codex plugin
+command and before the profile installer's explicit `--install` mode. It
+locates `codex` from `CODEX_BOOTSTRAP_CODEX_CMD`, `PATH`, or the ChatGPT
+application's bundled binary. If none is available, it links to the official
+Codex installation page and does not install anything in check or dry-run
+mode.
 
 The normal bootstrap installs or verifies Superpowers, registers this checkout
 as the `personal` marketplace, installs `personal-workflows@personal`, then

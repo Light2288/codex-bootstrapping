@@ -1,6 +1,7 @@
 """Regression tests for the public personal-workflows distribution."""
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -13,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MARKETPLACE_PATH = ROOT / ".agents" / "plugins" / "marketplace.json"
 PLUGIN_PATH = ROOT / "plugins" / "personal-workflows"
 MANIFEST_PATH = PLUGIN_PATH / ".codex-plugin" / "plugin.json"
+SECRET_SCANNER = ROOT / "scripts" / "scan_tracked_secrets.py"
 
 EXPECTED_SKILLS = {
     "arch-compare",
@@ -55,6 +57,15 @@ class PublicDistributionTest(unittest.TestCase):
 
     def load_marketplace(self):
         return json.loads(MARKETPLACE_PATH.read_text(encoding="utf-8"))
+
+    def run_secret_scanner(self, repository):
+        return subprocess.run(
+            [sys.executable, str(SECRET_SCANNER), "--root", str(repository)],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=dict(os.environ, PATH="/usr/bin:/bin:/usr/sbin:/sbin"),
+        )
 
     def test_marketplace_entry_resolves_to_the_public_plugin_manifest(self):
         marketplace = self.load_marketplace()
@@ -163,6 +174,73 @@ class PublicDistributionTest(unittest.TestCase):
         for value in values:
             with self.subTest(value=value):
                 self.assertIsNotNone(LIKELY_CREDENTIAL_VALUE.search(value))
+
+    def test_tracked_secret_scan_includes_docs_without_printing_the_match(self):
+        """Excluding public docs or echoing a match can publish or expose a credential."""
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            leak = "sk-" + "abcdefghijklmnopqrstuvwxyz123456"
+            (repository / "docs").mkdir()
+            (repository / "docs" / "leak.md").write_text(leak + "\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(repository)], check=True)
+            subprocess.run(["git", "-C", str(repository), "add", "docs/leak.md"], check=True)
+
+            result = self.run_secret_scanner(repository)
+
+            output = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 1, output)
+            self.assertIn("docs/leak.md:1", output)
+            self.assertNotIn(leak, output)
+
+    def test_tracked_secret_scan_allowlists_only_exact_detector_fixtures(self):
+        """A broad test-file exception would hide a real credential beside detector fixtures."""
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            fixture_path = repository / "tests" / "test_distribution.py"
+            fixture_path.parent.mkdir()
+            intentional_fixtures = (
+                "sk-abcdefghijklmnopqrstuvwxyz123456",
+                "ghp_abcdefghijklmnopqrstuvwxyz1234567890",
+                "github_pat_abcdefghijklmnopqrstuvwxyz",
+                "xoxb-1234567890-abcdefghijklmnopqrstuvwxyz",
+            )
+            fixture_path.write_text("\n".join(intentional_fixtures) + "\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(repository)], check=True)
+            subprocess.run(["git", "-C", str(repository), "add", "tests/test_distribution.py"], check=True)
+
+            allowed = self.run_secret_scanner(repository)
+
+            self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
+
+            unexpected = "sk-" + "abcdefghijklmnopqrstuvwxyz654321"
+            fixture_path.write_text(
+                fixture_path.read_text(encoding="utf-8") + unexpected + "\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "-C", str(repository), "add", "tests/test_distribution.py"], check=True)
+
+            rejected = self.run_secret_scanner(repository)
+
+            output = rejected.stdout + rejected.stderr
+            self.assertEqual(rejected.returncode, 1, output)
+            self.assertIn("tests/test_distribution.py:5", output)
+            self.assertNotIn(unexpected, output)
+
+    def test_tracked_secret_scan_does_not_follow_symlinks_outside_the_repository(self):
+        """Following a tracked symlink could make verification read machine-local state."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            repository = temporary / "repository"
+            repository.mkdir()
+            external = temporary / "machine-local"
+            external.write_text("sk-" + "outside_repository_credential" + "\n", encoding="utf-8")
+            (repository / "tracked-link").symlink_to(external)
+            subprocess.run(["git", "init", "-q", str(repository)], check=True)
+            subprocess.run(["git", "-C", str(repository), "add", "tracked-link"], check=True)
+
+            result = self.run_secret_scanner(repository)
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_distribution_declares_no_figma_integration_or_likely_credentials(self):
         json_paths = [MARKETPLACE_PATH, MANIFEST_PATH]

@@ -40,8 +40,5 @@ assert marketplace["plugins"][0]["name"] == manifest["name"]
 mapping = json.loads((root / "plugins/personal-workflows/references/integration-map.json").read_text(encoding="utf-8"))
 assert mapping["wrappers"] and mapping["standalone"]
 '
-if rg -n --hidden --glob '!.git/**' --glob '!docs/**' --glob '!tests/**' '(sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|xox[bp]-[A-Za-z0-9-]{20,})' .; then
-  print -u2 "Likely credential found."
-  exit 1
-fi
+"$python_command" scripts/scan_tracked_secrets.py
 print "Repository verification passed."

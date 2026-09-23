@@ -8,7 +8,9 @@ Superpowers.
 ## What is included
 
 - The `personal` Codex marketplace and `personal-workflows` plugin.
-- Thirteen workflow skills and five managed, read-only Codex agent profiles.
+- Thirteen workflow skills and five managed Codex agent profiles: three
+  read-only review agents and two document agents restricted to
+  `workspace-write`.
 - A profile installer that adds only the plugin's marked guidance and managed
   agents to a chosen Codex home.
 - Public project, security, contribution, and workflow documentation.

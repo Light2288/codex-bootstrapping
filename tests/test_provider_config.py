@@ -70,6 +70,59 @@ class ProviderConfigTest(unittest.TestCase):
         self.assertIn('model = "gpt-5.6-sol" # selected model\n', rendered)
         self.assertEqual(rendered.count("[model_providers.ibm_ica]"), 1)
 
+    def test_merge_preserves_root_and_table_lookalikes_in_multiline_basic_strings(self):
+        """Treating escaped quotes or string content as syntax can corrupt unrelated TOML."""
+        multiline_value = (
+            'notes = """\n'
+            'model = "inside-basic"\n'
+            '[model_providers.ibm_ica]\n'
+            'escaped delimiter: \\"""\n'
+            'model_provider = "still-inside"\n'
+            '"""\n'
+        )
+        existing = multiline_value + 'model = "old-model"\n[mcp_servers.keep]\ncommand = "keep"\n'
+
+        rendered = merge_config(existing, DEFAULT_SETTINGS)
+
+        self.assertIn(multiline_value, rendered)
+        self.assertIn('model = "gpt-5.6-sol"\n', rendered)
+        self.assertIn('[mcp_servers.keep]\ncommand = "keep"\n', rendered)
+        self.assertEqual(rendered.count("[model_providers.ibm_ica]"), 2)
+
+    def test_merge_preserves_root_and_table_lookalikes_in_multiline_literal_strings(self):
+        """Literal-string contents that resemble managed syntax must remain user-owned text."""
+        multiline_value = (
+            "notes = '''\n"
+            'model_reasoning_effort = "inside-literal"\n'
+            '[[model_providers.ibm_ica]]\n'
+            "'''\n"
+        )
+        existing = multiline_value + 'model_reasoning_effort = "low"\n[tool.keep]\nenabled = true\n'
+
+        rendered = merge_config(existing, DEFAULT_SETTINGS)
+
+        self.assertIn(multiline_value, rendered)
+        self.assertIn('model_reasoning_effort = "high"\n', rendered)
+        self.assertIn('[tool.keep]\nenabled = true\n', rendered)
+        self.assertEqual(rendered.count("[[model_providers.ibm_ica]]"), 1)
+
+    def test_merge_replaces_quoted_managed_root_keys_without_adding_duplicates(self):
+        """Ignoring quoted root keys creates duplicate semantic assignments in valid TOML."""
+        existing = (
+            '"model" = "old-model"\n'
+            "'model_reasoning_effort' = \"medium\"\n"
+            '"model_provider" = "other"\n'
+        )
+
+        rendered = merge_config(existing, DEFAULT_SETTINGS)
+
+        self.assertIn('"model" = "gpt-5.6-sol"\n', rendered)
+        self.assertIn("'model_reasoning_effort' = \"high\"\n", rendered)
+        self.assertIn('"model_provider" = "ibm_ica"\n', rendered)
+        self.assertNotIn('\nmodel = ', rendered)
+        self.assertNotIn('\nmodel_reasoning_effort = ', rendered)
+        self.assertNotIn('\nmodel_provider = ', rendered)
+
     def test_merge_replaces_selected_provider_and_its_nested_auth_table(self):
         """Leaving stale provider auth behind can select the wrong credential source."""
         existing = (
@@ -187,6 +240,22 @@ class ProviderConfigTest(unittest.TestCase):
                 with self.assertRaises(ValidationError):
                     validate_settings(ProviderSettings(**values))
 
+    def test_reserved_codex_provider_ids_are_rejected_case_sensitively(self):
+        """Replacing a built-in provider ID could corrupt Codex's reserved configuration."""
+        for provider_id in ("openai", "ollama", "lmstudio"):
+            with self.subTest(provider_id=provider_id):
+                values = DEFAULT_SETTINGS.__dict__.copy()
+                values["provider_id"] = provider_id
+                with self.assertRaisesRegex(ValidationError, "reserved"):
+                    validate_settings(ProviderSettings(**values))
+
+        for provider_id in ("custom-provider_1", "OpenAI"):
+            with self.subTest(provider_id=provider_id):
+                values = DEFAULT_SETTINGS.__dict__.copy()
+                values["provider_id"] = provider_id
+                settings = ProviderSettings(**values)
+                self.assertIs(validate_settings(settings), settings)
+
     def test_websocket_setting_renders_both_boolean_values(self):
         """Inverting provider websocket support changes Codex transport behavior."""
         enabled_values = DEFAULT_SETTINGS.__dict__.copy()
@@ -289,6 +358,48 @@ class ProviderConfigTest(unittest.TestCase):
                     self.assertFalse(target.parent.exists())
                     self.assertNotIn(secret, result.stdout)
                     self.assertNotIn(secret, result.stderr)
+
+    def test_wrapper_rejects_reserved_provider_ids_before_credentials_or_config_writes(self):
+        """Reserved IDs must fail at preview validation, before any credential side effect."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            target = temporary / "config.toml"
+            helper_log = temporary / "keychain-helper-called"
+            fake_helper = temporary / "fake-keychain-helper"
+            original = 'approval_policy = "on-request"\n'
+            target.write_text(original, encoding="utf-8")
+            fake_helper.write_text(
+                "#!{0}\n"
+                "import os\n"
+                "from pathlib import Path\n"
+                "Path(os.environ['FAKE_HELPER_LOG']).write_text('called', encoding='utf-8')\n".format(
+                    sys.executable
+                ),
+                encoding="utf-8",
+            )
+            fake_helper.chmod(0o755)
+
+            for provider_id in ("openai", "ollama", "lmstudio"):
+                with self.subTest(provider_id=provider_id):
+                    result = subprocess.run(
+                        ["zsh", str(WRAPPER), "--config", str(target)],
+                        check=False,
+                        capture_output=True,
+                        input=provider_id + ("\n" * 9),
+                        text=True,
+                        env=dict(
+                            os.environ,
+                            CODEX_PROVIDER_KEYCHAIN_HELPER=str(fake_helper),
+                            FAKE_HELPER_LOG=str(helper_log),
+                        ),
+                    )
+
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("reserved", result.stderr)
+                    self.assertNotIn("Apply this configuration?", result.stdout)
+                    self.assertNotIn("API key", result.stdout)
+                    self.assertFalse(helper_log.exists())
+                    self.assertEqual(target.read_text(encoding="utf-8"), original)
 
     def test_wrapper_uses_keychain_helper_for_set_update_and_rollback(self):
         """Keychain writes must be stdin-only and compensated after config failure."""

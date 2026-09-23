@@ -17,6 +17,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 from urllib.parse import urlparse
 
 
@@ -51,6 +52,7 @@ DEFAULT_SETTINGS = ProviderSettings(
 
 
 _PROVIDER_ID = re.compile(r"^[A-Za-z0-9_-]+$")
+_RESERVED_PROVIDER_IDS = {"openai", "ollama", "lmstudio"}
 _ENVIRONMENT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _MANAGED_ROOT_KEYS = ("model", "model_reasoning_effort", "model_provider")
 _REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
@@ -62,6 +64,13 @@ class _TableHeader:
     path: tuple
 
 
+@dataclass(frozen=True)
+class _LexedLine:
+    text: str
+    is_structural: bool
+    multiline_after: Optional[str]
+
+
 def _require_safe_text(name, value):
     if not isinstance(value, str) or not value or any(ord(character) < 32 for character in value):
         raise ValidationError("{0} must be non-empty text without control characters".format(name))
@@ -71,6 +80,8 @@ def validate_settings(settings):
     """Validate settings before they are rendered into TOML."""
     if not _PROVIDER_ID.match(settings.provider_id):
         raise ValidationError("provider ID may contain only letters, numbers, underscores, and hyphens")
+    if settings.provider_id in _RESERVED_PROVIDER_IDS:
+        raise ValidationError("provider ID is reserved by Codex")
     _require_safe_text("display name", settings.display_name)
     _require_safe_text("model", settings.model)
     parsed_url = urlparse(settings.base_url)
@@ -133,9 +144,71 @@ def _provider_table(settings):
 
 
 def _root_assignment_pattern(key):
+    key_syntax = r"(?:{0}|\"{0}\"|'{0}')".format(re.escape(key))
     return re.compile(
-        r"^(\s*" + re.escape(key) + r"\s*=\s*)(.*?)(\s*(?:#.*)?)(\r?\n?)$"
+        r"^(\s*" + key_syntax + r"\s*=\s*)(.*?)(\s*(?:#.*)?)(\r?\n?)$"
     )
+
+
+def _multiline_state_after(line, state):
+    """Track multiline strings while ignoring delimiters in comments and single-line strings."""
+    index = 0
+    while index < len(line):
+        if state == "basic":
+            if line.startswith('"""', index):
+                state = None
+                index += 3
+            elif line[index] == "\\":
+                index += 2
+            else:
+                index += 1
+            continue
+        if state == "literal":
+            if line.startswith("'''", index):
+                state = None
+                index += 3
+            else:
+                index += 1
+            continue
+
+        character = line[index]
+        if character == "#":
+            break
+        if line.startswith('"""', index):
+            state = "basic"
+            index += 3
+            continue
+        if line.startswith("'''", index):
+            state = "literal"
+            index += 3
+            continue
+        if character == '"':
+            index += 1
+            while index < len(line):
+                if line[index] == "\\":
+                    index += 2
+                elif line[index] == '"':
+                    index += 1
+                    break
+                else:
+                    index += 1
+            continue
+        if character == "'":
+            closing_quote = line.find("'", index + 1)
+            index = len(line) if closing_quote < 0 else closing_quote + 1
+            continue
+        index += 1
+    return state
+
+
+def _lex_toml_lines(lines):
+    state = None
+    lexed = []
+    for line in lines:
+        is_structural = state is None
+        state = _multiline_state_after(line, state)
+        lexed.append(_LexedLine(line, is_structural, state))
+    return lexed
 
 
 def _decode_toml_basic_key(value):
@@ -299,7 +372,10 @@ def _validate_managed_toml(lines, provider_id):
     root_counts = {key: 0 for key in _MANAGED_ROOT_KEYS}
     table_counts = {}
     target_path = ("model_providers", provider_id)
-    for line in lines:
+    for lexed_line in _lex_toml_lines(lines):
+        if not lexed_line.is_structural:
+            continue
+        line = lexed_line.text
         stripped = line.lstrip()
         if stripped.startswith("["):
             header = _parse_table_header(line)
@@ -350,8 +426,15 @@ def merge_config(existing, settings):
     replaced_roots = set()
     skip_selected_provider = False
 
-    for index, line in enumerate(lines):
-        header = _parse_table_header(line)
+    skip_replaced_multiline = False
+    for index, lexed_line in enumerate(_lex_toml_lines(lines)):
+        line = lexed_line.text
+        if skip_replaced_multiline:
+            if lexed_line.multiline_after is None:
+                skip_replaced_multiline = False
+            continue
+
+        header = _parse_table_header(line) if lexed_line.is_structural else None
         if header is not None:
             first_table = min(first_table, index)
             skip_selected_provider = _is_managed_provider_path(header, target_path)
@@ -360,12 +443,16 @@ def merge_config(existing, settings):
         if skip_selected_provider:
             continue
 
-        if index < first_table:
+        if index < first_table and lexed_line.is_structural:
             did_replace = False
             for key, value in root_values.items():
                 root_match = _root_assignment_pattern(key).match(line)
                 if root_match:
-                    kept_lines.append(root_match.group(1) + value + root_match.group(3) + root_match.group(4))
+                    if lexed_line.multiline_after is None:
+                        kept_lines.append(root_match.group(1) + value + root_match.group(3) + root_match.group(4))
+                    else:
+                        kept_lines.append(root_match.group(1) + value + root_match.group(4))
+                        skip_replaced_multiline = True
                     replaced_roots.add(key)
                     did_replace = True
                     break
@@ -380,8 +467,10 @@ def merge_config(existing, settings):
     ]
     if missing_root_lines:
         insertion_index = 0
-        while insertion_index < len(kept_lines):
-            if _parse_table_header(kept_lines[insertion_index]) is not None:
+        lexed_kept_lines = _lex_toml_lines(kept_lines)
+        while insertion_index < len(lexed_kept_lines):
+            lexed_line = lexed_kept_lines[insertion_index]
+            if lexed_line.is_structural and _parse_table_header(lexed_line.text) is not None:
                 break
             insertion_index += 1
         kept_lines[insertion_index:insertion_index] = missing_root_lines

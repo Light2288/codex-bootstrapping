@@ -137,6 +137,106 @@ class BootstrapTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("https://developers.openai.com/codex/", result.stderr)
 
+    def test_missing_codex_downloads_the_official_installer_with_sh_only_after_confirmation(self):
+        """A stale URL, wrong shell, or pre-confirmation download makes clean-machine setup unsafe."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            fake_bin = temporary / "bin"
+            fake_bin.mkdir()
+            curl_log = temporary / "curl.json"
+            sh_log = temporary / "sh.json"
+            zsh_log = temporary / "zsh.json"
+            installed_codex = temporary / "installed-codex"
+            fake_curl = fake_bin / "curl"
+            fake_sh = fake_bin / "sh"
+            fake_zsh = fake_bin / "zsh"
+            fake_curl.write_text(
+                "#!{python}\n"
+                "import json\n"
+                "import os\n"
+                "import sys\n"
+                "from pathlib import Path\n"
+                "Path(os.environ['FAKE_CURL_LOG']).write_text(json.dumps(sys.argv[1:]), encoding='utf-8')\n"
+                "output = Path(sys.argv[sys.argv.index('-o') + 1])\n"
+                "output.write_text('# controlled installer fixture\\n', encoding='utf-8')\n".format(
+                    python=sys.executable
+                ),
+                encoding="utf-8",
+            )
+            fake_sh.write_text(
+                "#!{python}\n"
+                "import json\n"
+                "import os\n"
+                "import sys\n"
+                "from pathlib import Path\n"
+                "Path(os.environ['FAKE_SH_LOG']).write_text(json.dumps(sys.argv[1:]), encoding='utf-8')\n"
+                "target = Path(os.environ['FAKE_INSTALLED_CODEX'])\n"
+                "target.write_text(\"#!/bin/sh\\nif [ \\\"$*\\\" = \\\"plugin marketplace list --json\\\" ]; then\\n  echo '[]'\\nfi\\nexit 0\\n\", encoding='utf-8')\n"
+                "target.chmod(0o755)\n".format(python=sys.executable),
+                encoding="utf-8",
+            )
+            fake_zsh.write_text(
+                "#!{python}\n"
+                "import os\n"
+                "import sys\n"
+                "from pathlib import Path\n"
+                "Path(os.environ['FAKE_ZSH_LOG']).write_text('invoked', encoding='utf-8')\n"
+                "sys.exit(91)\n".format(python=sys.executable),
+                encoding="utf-8",
+            )
+            for executable in (fake_curl, fake_sh, fake_zsh):
+                executable.chmod(0o755)
+
+            environment = dict(
+                os.environ,
+                PATH=str(fake_bin) + os.pathsep + "/usr/bin:/bin:/usr/sbin:/sbin",
+                CODEX_BOOTSTRAP_BUNDLED_CODEX=str(installed_codex),
+                FAKE_CURL_LOG=str(curl_log),
+                FAKE_SH_LOG=str(sh_log),
+                FAKE_ZSH_LOG=str(zsh_log),
+                FAKE_INSTALLED_CODEX=str(installed_codex),
+            )
+            command = [
+                "/bin/zsh",
+                str(SCRIPT),
+                "--codex-home",
+                str(temporary / "codex-home"),
+            ]
+
+            for arguments, input_text in ((["--check"], ""), (["--dry-run"], ""), ([], "n\n")):
+                with self.subTest(arguments=arguments, input_text=input_text):
+                    result = subprocess.run(
+                        command + arguments,
+                        check=False,
+                        capture_output=True,
+                        input=input_text,
+                        text=True,
+                        env=environment,
+                    )
+
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertFalse(curl_log.exists())
+                    self.assertFalse(sh_log.exists())
+                    self.assertFalse(zsh_log.exists())
+                    if not arguments:
+                        self.assertIn("https://chatgpt.com/codex/install.sh", result.stdout)
+
+            result = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                input="y\ny\n",
+                text=True,
+                env=environment,
+            )
+
+            curl_arguments = json.loads(curl_log.read_text(encoding="utf-8"))
+            self.assertEqual(curl_arguments[:2], ["-fsSL", "https://chatgpt.com/codex/install.sh"])
+            self.assertEqual(curl_arguments[2], "-o")
+            self.assertEqual(json.loads(sh_log.read_text(encoding="utf-8")), [curl_arguments[3]])
+            self.assertFalse(zsh_log.exists())
+            self.assertEqual(result.returncode, 0, (result.stdout, result.stderr))
+
     def test_inspection_modes_do_not_write_a_codex_home_or_invoke_codex(self):
         """Inspection must not risk a Codex startup write in the caller's home."""
         with tempfile.TemporaryDirectory() as directory:

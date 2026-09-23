@@ -14,5 +14,7 @@ with the reporter on coordinated disclosure.
 ## Scope
 
 This repository intentionally excludes user credentials, local Codex state,
-and provider configuration. Treat any unexpected secret-like value in the
-repository as a security issue.
+and machine-local provider state. The provider configurator and its public
+documentation are tracked, but generated provider configuration and stored
+credentials are not. Treat any unexpected secret-like value in the repository
+as a security issue.

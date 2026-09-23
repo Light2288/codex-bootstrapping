@@ -1,0 +1,43 @@
+{
+  "wrappers": {
+    "spec-define": ["brainstorming"],
+    "spec-plan": ["writing-plans"],
+    "spec-implement": ["using-git-worktrees", "executing-plans", "subagent-driven-development", "test-driven-development", "systematic-debugging", "verification-before-completion", "finishing-a-development-branch"],
+    "code-review": ["requesting-code-review", "receiving-code-review"],
+    "debug": ["systematic-debugging"]
+  },
+  "execution_routes": {
+    "spec-implement": {
+      "selection": {
+        "precedence": [
+          "explicit-current-user-or-handoff",
+          "approved-plan-selection"
+        ],
+        "conflicting-non-user-sources": "stop-before-loading-either"
+      },
+      "subagent-driven-development": {
+        "ordered_phases": [
+          {
+            "event": "base:per-task-review",
+            "repeat": "per-task",
+            "enabled": true
+          },
+          {
+            "event": "generic:final-review",
+            "enabled": false
+          },
+          {
+            "event": "personal:code-review",
+            "enabled": true
+          },
+          {
+            "event": "base:finishing-a-development-branch",
+            "enabled": true
+          }
+        ]
+      }
+    }
+  },
+  "standalone": ["arch-map", "arch-compare", "arch-design", "doc-ingest", "doc-analyze", "doc-estimate", "doc-summarize", "repository-audit"],
+  "agents": ["review-spec", "review-quality", "review-audit", "doc-analyst", "document-worker"]
+}

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Spec Plan"
+  short_description: "Plan approved Superpowers specifications"
+  default_prompt: "Use $spec-plan to create an evidence-backed implementation plan for this approved specification."
+policy:
+  allow_implicit_invocation: true

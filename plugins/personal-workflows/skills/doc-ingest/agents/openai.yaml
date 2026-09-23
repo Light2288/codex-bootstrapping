@@ -1,0 +1,6 @@
+interface:
+  display_name: "Document Ingest"
+  short_description: "Normalize local documents into cited evidence"
+  default_prompt: "Use $doc-ingest to normalize this local source directory into reusable evidence."
+policy:
+  allow_implicit_invocation: true

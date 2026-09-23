@@ -1,0 +1,6 @@
+interface:
+  display_name: "Code Review"
+  short_description: "Run the sequential final review gate"
+  default_prompt: "Use $code-review to review this change with specification compliance before code quality."
+policy:
+  allow_implicit_invocation: true

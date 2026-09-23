@@ -1,0 +1,27 @@
+{
+  "name": "personal-workflows",
+  "version": "1.0.0",
+  "description": "Personal Codex workflows that extend Superpowers with spec-driven SDLC, architecture, document, and repository-audit capabilities.",
+  "author": {
+    "name": "Light2288",
+    "url": "https://github.com/Light2288"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/Light2288/codex-bootstrapping",
+  "keywords": [
+    "codex",
+    "superpowers",
+    "workflows",
+    "sdlc"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Personal Workflows",
+    "shortDescription": "Extend Superpowers with personal engineering workflows.",
+    "longDescription": "Extends Superpowers with spec-driven SDLC, architecture, document, and repository-audit workflows for Codex.",
+    "developerName": "Light2288",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Use Personal Workflows to extend Superpowers with spec-driven SDLC, architecture, document, and repository-audit workflows."
+  }
+}

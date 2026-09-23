@@ -6,6 +6,7 @@ setopt errexit nounset pipefail
 
 script_dir=${0:A:h}
 transformer="$script_dir/provider_config.py"
+security_command="${CODEX_PROVIDER_SECURITY_COMMAND:-/usr/bin/security}"
 config_path="${CODEX_HOME:-$HOME/.codex}/config.toml"
 mode="apply"
 smoke_test=false
@@ -121,16 +122,50 @@ IFS= read -r confirmation
 [[ "$confirmation" == "y" || "$confirmation" == "Y" ]] || { print "No changes made."; exit 0; }
 
 if [[ "$auth_mode" == "keychain" ]]; then
+  [[ -x "$security_command" ]] || { print -u2 "Keychain command is not executable"; exit 1; }
   print -n "API key (stored only in macOS Keychain; input hidden): "
   IFS= read -r -s api_key
   print ""
   [[ -n "$api_key" ]] || { print -u2 "API key cannot be empty"; exit 1; }
   service="codex-provider-$provider_id"
-  /usr/bin/security add-generic-password -U -s "$service" -a "codex" -w "$api_key" >/dev/null
+  prior_credential=""
+  had_prior_credential=false
+  if prior_credential=$("$security_command" find-generic-password -s "$service" -a "codex" -w 2>/dev/null); then
+    had_prior_credential=true
+  else
+    lookup_status=$?
+    if (( lookup_status != 44 )); then
+      print -u2 "Could not inspect the existing macOS Keychain credential"
+      exit 1
+    fi
+  fi
+  if ! print -rn -- "$api_key" | "$security_command" add-generic-password -U -s "$service" -a "codex" -w >/dev/null; then
+    unset api_key
+    print -u2 "Could not store the API key in macOS Keychain"
+    exit 1
+  fi
   unset api_key
 fi
 
-python3 "$transformer" "${transformer_args[@]}"
+config_status=0
+python3 "$transformer" "${transformer_args[@]}" || config_status=$?
+if (( config_status != 0 )); then
+  if [[ "$auth_mode" == "keychain" ]]; then
+    if [[ "$had_prior_credential" == true ]]; then
+      print -rn -- "$prior_credential" | "$security_command" add-generic-password -U -s "$service" -a "codex" -w >/dev/null || {
+        print -u2 "Configuration failed and the prior Keychain credential could not be restored"
+        exit "$config_status"
+      }
+    else
+      "$security_command" delete-generic-password -s "$service" -a "codex" >/dev/null 2>&1 || {
+        print -u2 "Configuration failed and the new Keychain credential could not be removed"
+        exit "$config_status"
+      }
+    fi
+  fi
+  print -u2 "Provider configuration failed; Keychain state was rolled back"
+  exit "$config_status"
+fi
 
 if [[ "$smoke_test" == true ]]; then
   if (( $+commands[codex] )); then

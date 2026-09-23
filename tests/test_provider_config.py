@@ -1,6 +1,7 @@
 """Behavioral tests for the safe custom-provider TOML transformer."""
 
 import importlib.util
+import hashlib
 import os
 import subprocess
 import sys
@@ -91,6 +92,30 @@ class ProviderConfigTest(unittest.TestCase):
         self.assertIn('[model_providers.other]\nname = "Keep"\n', rendered)
         self.assertEqual(rendered.count("[model_providers.ibm_ica]"), 1)
         self.assertEqual(rendered.count("[model_providers.ibm_ica.auth]"), 1)
+
+    def test_merge_preserves_unrelated_array_tables(self):
+        """Rejecting a valid unrelated array table prevents safe configuration updates."""
+        existing = '[[tool.rules]]\nname = "keep this rule"\n'
+
+        rendered = merge_config(existing, DEFAULT_SETTINGS)
+
+        self.assertIn(existing, rendered)
+        self.assertIn("[model_providers.ibm_ica]", rendered)
+
+    def test_merge_replaces_a_quoted_selected_provider_header(self):
+        """Missing a quoted managed header leaves duplicate semantic provider tables."""
+        existing = (
+            '[model_providers."ibm_ica"]\n'
+            'name = "Old IBM"\n'
+            'env_key = "OLD_KEY"\n'
+        )
+
+        rendered = merge_config(existing, DEFAULT_SETTINGS)
+
+        self.assertNotIn("Old IBM", rendered)
+        self.assertNotIn("OLD_KEY", rendered)
+        self.assertNotIn('[model_providers."ibm_ica"]', rendered)
+        self.assertEqual(rendered.count("[model_providers.ibm_ica]"), 1)
 
     def test_merge_escapes_toml_strings_without_using_input_as_toml_syntax(self):
         """An unescaped quote or backslash could turn a provider value into TOML syntax."""
@@ -242,6 +267,180 @@ class ProviderConfigTest(unittest.TestCase):
                     self.assertFalse(target.parent.exists())
                     self.assertNotIn(secret, result.stdout)
                     self.assertNotIn(secret, result.stderr)
+
+    def test_wrapper_rolls_back_keychain_when_config_update_fails(self):
+        """A failed config write must not leak argv secrets or change credentials."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            fake_bin = temporary / "bin"
+            fake_bin.mkdir()
+            state = temporary / "keychain-state"
+            arguments = temporary / "security-arguments"
+            fake_security = fake_bin / "security"
+            fake_python = fake_bin / "python3"
+            fake_wrapper = temporary / "configure-provider.zsh"
+            original_config = temporary / "config.toml"
+            original_config.write_text('approval_policy = "on-request"\n', encoding="utf-8")
+            replacement_credential = "new-test-credential"
+
+            fake_security.write_text(
+                """#!/bin/zsh
+emulate -LR zsh
+setopt errexit nounset pipefail
+state=\"$FAKE_SECURITY_STATE\"
+arguments_file=\"$FAKE_SECURITY_ARGUMENTS\"
+operation=\"$1\"
+shift
+case \"$operation\" in
+  find-generic-password)
+    [[ -z \"${FAKE_SECURITY_LOOKUP_STATUS:-}\" ]] || exit \"$FAKE_SECURITY_LOOKUP_STATUS\"
+    [[ -f \"$state\" ]] || exit 44
+    cat \"$state\"
+    ;;
+  add-generic-password)
+    print -r -- \"$@\" > \"$arguments_file\"
+    [[ \"$argv[-1]\" == \"-w\" ]] || exit 45
+    credential=\"$(cat)\"
+    [[ -n \"$credential\" ]] || exit 46
+    print -rn -- \"$credential\" > \"$state\"
+    ;;
+  delete-generic-password)
+    rm -f \"$state\"
+    ;;
+  *)
+    exit 47
+    ;;
+esac
+""",
+                encoding="utf-8",
+            )
+            fake_python.write_text(
+                """#!/bin/zsh
+for argument in \"$@\"; do
+  [[ \"$argument\" == \"--dry-run\" ]] && exit 0
+done
+exit 42
+""",
+                encoding="utf-8",
+            )
+            for path in (fake_security, fake_python):
+                path.chmod(0o755)
+
+            wrapper_source = WRAPPER.read_text(encoding="utf-8")
+            wrapper_source = wrapper_source.replace(
+                'transformer="$script_dir/provider_config.py"',
+                'transformer="{0}"'.format(SCRIPT),
+            )
+            wrapper_source = wrapper_source.replace("/usr/bin/security", str(fake_security))
+            fake_wrapper.write_text(wrapper_source, encoding="utf-8")
+
+            for has_prior_credential in (False, True):
+                with self.subTest(has_prior_credential=has_prior_credential):
+                    if state.exists():
+                        state.unlink()
+                    if arguments.exists():
+                        arguments.unlink()
+                    prior_credential = "prior-test-credential"
+                    if has_prior_credential:
+                        state.write_text(prior_credential, encoding="utf-8")
+                    prior_digest = hashlib.sha256(
+                        prior_credential.encode("utf-8")
+                    ).hexdigest()
+                    result = subprocess.run(
+                        ["zsh", str(fake_wrapper), "--config", str(original_config)],
+                        check=False,
+                        capture_output=True,
+                        input=("\n" * 9) + "y\n" + replacement_credential + "\n",
+                        text=True,
+                        env=dict(
+                            os.environ,
+                            PATH=str(fake_bin) + os.pathsep + os.environ["PATH"],
+                            FAKE_SECURITY_STATE=str(state),
+                            FAKE_SECURITY_ARGUMENTS=str(arguments),
+                        ),
+                    )
+
+                    self.assertEqual(result.returncode, 42)
+                    self.assertNotIn(replacement_credential, result.stdout)
+                    self.assertNotIn(replacement_credential, result.stderr)
+                    self.assertNotIn(replacement_credential, arguments.read_text(encoding="utf-8"))
+                    self.assertTrue(arguments.read_text(encoding="utf-8").rstrip().endswith("-w"))
+                    self.assertEqual(
+                        original_config.read_text(encoding="utf-8"),
+                        'approval_policy = "on-request"\n',
+                    )
+                    if has_prior_credential:
+                        self.assertTrue(state.exists())
+                        self.assertEqual(
+                            hashlib.sha256(state.read_bytes()).hexdigest(),
+                            prior_digest,
+                        )
+                    else:
+                        self.assertFalse(state.exists())
+
+    def test_wrapper_stops_when_it_cannot_inspect_existing_keychain_state(self):
+        """Treating an unreadable Keychain item as absent could delete a real credential."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            fake_bin = temporary / "bin"
+            fake_bin.mkdir()
+            state = temporary / "keychain-state"
+            arguments = temporary / "security-arguments"
+            fake_security = fake_bin / "security"
+            fake_python = fake_bin / "python3"
+            fake_wrapper = temporary / "configure-provider.zsh"
+            target = temporary / "config.toml"
+            target.write_text('approval_policy = "on-request"\n', encoding="utf-8")
+            fake_security.write_text(
+                """#!/bin/zsh
+emulate -LR zsh
+setopt errexit nounset pipefail
+operation=\"$1\"
+shift
+if [[ \"$operation\" == \"find-generic-password\" ]]; then
+  exit \"${FAKE_SECURITY_LOOKUP_STATUS:-44}\"
+fi
+print -r -- \"$@\" > \"$FAKE_SECURITY_ARGUMENTS\"
+exit 98
+""",
+                encoding="utf-8",
+            )
+            fake_python.write_text(
+                """#!/bin/zsh
+for argument in \"$@\"; do
+  [[ \"$argument\" == \"--dry-run\" ]] && exit 0
+done
+exit 42
+""",
+                encoding="utf-8",
+            )
+            for path in (fake_security, fake_python):
+                path.chmod(0o755)
+            wrapper_source = WRAPPER.read_text(encoding="utf-8")
+            wrapper_source = wrapper_source.replace(
+                'transformer="$script_dir/provider_config.py"',
+                'transformer="{0}"'.format(SCRIPT),
+            )
+            wrapper_source = wrapper_source.replace("/usr/bin/security", str(fake_security))
+            fake_wrapper.write_text(wrapper_source, encoding="utf-8")
+
+            result = subprocess.run(
+                ["zsh", str(fake_wrapper), "--config", str(target)],
+                check=False,
+                capture_output=True,
+                input=("\n" * 9) + "y\n" + "unprinted-test-credential\n",
+                text=True,
+                env=dict(
+                    os.environ,
+                    PATH=str(fake_bin) + os.pathsep + os.environ["PATH"],
+                    FAKE_SECURITY_LOOKUP_STATUS="1",
+                    FAKE_SECURITY_ARGUMENTS=str(arguments),
+                ),
+            )
+
+            self.assertEqual(result.returncode, 1)
+            self.assertFalse(arguments.exists())
+            self.assertEqual(target.read_text(encoding="utf-8"), 'approval_policy = "on-request"\n')
 
 
 if __name__ == "__main__":

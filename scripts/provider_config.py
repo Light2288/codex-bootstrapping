@@ -10,6 +10,7 @@ from __future__ import print_function
 
 import argparse
 import datetime
+import json
 import os
 import re
 import shutil
@@ -52,9 +53,14 @@ DEFAULT_SETTINGS = ProviderSettings(
 
 _PROVIDER_ID = re.compile(r"^[A-Za-z0-9_-]+$")
 _ENVIRONMENT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_TABLE_HEADER = re.compile(r"^\s*\[([^\[\]]+)\]\s*(?:#.*)?(?:\r?\n)?$")
 _MANAGED_ROOT_KEYS = ("model", "model_reasoning_effort", "model_provider")
 _REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+
+
+@dataclass(frozen=True)
+class _TableHeader:
+    is_array: bool
+    path: tuple
 
 
 def _require_safe_text(name, value):
@@ -133,22 +139,133 @@ def _root_assignment_pattern(key):
     )
 
 
+def _parse_dotted_keys(value):
+    """Parse the TOML table-key subset needed to identify managed tables."""
+    index = 0
+    keys = []
+    length = len(value)
+    while index < length:
+        while index < length and value[index].isspace():
+            index += 1
+        if index == length:
+            return None
+        if value[index] == '"':
+            start = index
+            index += 1
+            escaped = False
+            while index < length:
+                character = value[index]
+                if escaped:
+                    escaped = False
+                elif character == "\\":
+                    escaped = True
+                elif character == '"':
+                    index += 1
+                    break
+                index += 1
+            else:
+                return None
+            try:
+                keys.append(json.loads(value[start:index]))
+            except ValueError:
+                return None
+        elif value[index] == "'":
+            index += 1
+            start = index
+            while index < length and value[index] != "'":
+                index += 1
+            if index == length:
+                return None
+            keys.append(value[start:index])
+            index += 1
+        else:
+            matched = re.match(r"[A-Za-z0-9_-]+", value[index:])
+            if not matched:
+                return None
+            keys.append(matched.group(0))
+            index += len(matched.group(0))
+
+        while index < length and value[index].isspace():
+            index += 1
+        if index == length:
+            return tuple(keys)
+        if value[index] != ".":
+            return None
+        index += 1
+    return None
+
+
+def _parse_table_header(line):
+    """Return a parsed TOML table header, or ``None`` when the line is not one."""
+    source = line.rstrip("\r\n")
+    position = 0
+    while position < len(source) and source[position].isspace():
+        position += 1
+    if not source.startswith("[", position):
+        return None
+
+    is_array = source.startswith("[[", position)
+    position += 2 if is_array else 1
+    start = position
+    quote = None
+    escaped = False
+    while position < len(source):
+        character = source[position]
+        if quote is not None:
+            if quote == '"' and escaped:
+                escaped = False
+            elif quote == '"' and character == "\\":
+                escaped = True
+            elif character == quote:
+                quote = None
+            position += 1
+            continue
+        if character in ("'", '"'):
+            quote = character
+            position += 1
+            continue
+        if is_array and source.startswith("]]", position):
+            end = position
+            position += 2
+            break
+        if not is_array and character == "]":
+            end = position
+            position += 1
+            break
+        position += 1
+    else:
+        return None
+
+    remainder = source[position:]
+    if not re.match(r"^\s*(?:#.*)?$", remainder):
+        return None
+    raw_path = source[start:end]
+    return _TableHeader(is_array, _parse_dotted_keys(raw_path))
+
+
+def _is_managed_provider_path(header, target_path):
+    if header.path is None:
+        raise ValidationError("table header uses unsupported TOML key syntax")
+    return header.path[: len(target_path)] == target_path
+
+
 def _validate_managed_toml(lines, provider_id):
     root_section = True
     root_counts = {key: 0 for key in _MANAGED_ROOT_KEYS}
     table_counts = {}
-    target = "model_providers.{0}".format(provider_id)
+    target_path = ("model_providers", provider_id)
     for line in lines:
         stripped = line.lstrip()
         if stripped.startswith("["):
-            matched = _TABLE_HEADER.match(line)
-            if not matched:
+            header = _parse_table_header(line)
+            if header is None:
                 raise ValidationError("malformed TOML table header")
             root_section = False
-            header = matched.group(1).strip()
-            if header == target or header.startswith(target + "."):
-                table_counts[header] = table_counts.get(header, 0) + 1
-                if table_counts[header] > 1:
+            if _is_managed_provider_path(header, target_path):
+                if header.is_array:
+                    raise ValidationError("managed provider cannot be an array table")
+                table_counts[header.path] = table_counts.get(header.path, 0) + 1
+                if table_counts[header.path] > 1:
                     raise ValidationError("managed provider table appears more than once")
             continue
         if root_section:
@@ -178,7 +295,7 @@ def merge_config(existing, settings):
     _validate_toml_if_available(existing)
 
     first_table = len(lines)
-    target = "model_providers.{0}".format(settings.provider_id)
+    target_path = ("model_providers", settings.provider_id)
     kept_lines = []
     root_values = {
         "model": toml_quote(settings.model),
@@ -189,11 +306,10 @@ def merge_config(existing, settings):
     skip_selected_provider = False
 
     for index, line in enumerate(lines):
-        table_match = _TABLE_HEADER.match(line)
-        if table_match:
+        header = _parse_table_header(line)
+        if header is not None:
             first_table = min(first_table, index)
-            header = table_match.group(1).strip()
-            skip_selected_provider = header == target or header.startswith(target + ".")
+            skip_selected_provider = _is_managed_provider_path(header, target_path)
             if skip_selected_provider:
                 continue
         if skip_selected_provider:
@@ -220,7 +336,7 @@ def merge_config(existing, settings):
     if missing_root_lines:
         insertion_index = 0
         while insertion_index < len(kept_lines):
-            if _TABLE_HEADER.match(kept_lines[insertion_index]):
+            if _parse_table_header(kept_lines[insertion_index]) is not None:
                 break
             insertion_index += 1
         kept_lines[insertion_index:insertion_index] = missing_root_lines

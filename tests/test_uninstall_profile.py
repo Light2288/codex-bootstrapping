@@ -5,7 +5,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,6 +15,9 @@ SCRIPT = ROOT / "scripts" / "uninstall-profile.py"
 PLUGIN = ROOT / "plugins" / "personal-workflows"
 INSTALLER = PLUGIN / "scripts" / "install_profile.py"
 MANAGED_HEADER = "# Managed by personal-workflows\n"
+SPEC = spec_from_file_location("uninstall_profile", SCRIPT)
+UNINSTALL = module_from_spec(SPEC)
+SPEC.loader.exec_module(UNINSTALL)
 
 
 class UninstallProfileTest(unittest.TestCase):
@@ -94,6 +99,30 @@ class UninstallProfileTest(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("markers are unmatched", result.stderr)
+
+    def test_cleanup_failure_restores_every_staged_agent_and_guidance(self):
+        """A cleanup failure must not leave users with a partially removed profile."""
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "codex-home"
+            self.install_profile(home)
+            original_guidance = (home / "AGENTS.md").read_bytes()
+            original_agents = {
+                path.name: path.read_bytes() for path in (home / "agents").glob("*.toml")
+            }
+
+            def partially_delete_then_fail(quarantine):
+                next(quarantine.rglob("*.toml")).unlink()
+                raise OSError("injected cleanup failure")
+
+            with patch.object(UNINSTALL, "_delete_quarantine", side_effect=partially_delete_then_fail, create=True):
+                with self.assertRaises(OSError):
+                    UNINSTALL.uninstall_profile(home, PLUGIN, check_only=False)
+
+            self.assertEqual((home / "AGENTS.md").read_bytes(), original_guidance)
+            self.assertEqual(
+                {path.name: path.read_bytes() for path in (home / "agents").glob("*.toml")},
+                original_agents,
+            )
 
 
 if __name__ == "__main__":

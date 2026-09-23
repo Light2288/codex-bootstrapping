@@ -62,3 +62,10 @@ codex plugin marketplace remove personal
 
 Those CLI actions are intentionally not performed by the profile uninstall
 helper.
+
+## Release smoke test
+
+Before publishing a release, validate the confirmed missing-Codex download
+path on a clean macOS account. Automated tests deliberately use temporary
+homes and fake Codex executables, so they do not download or execute the
+network installer.

@@ -95,17 +95,34 @@ root = os.path.realpath(os.environ["REPOSITORY_ROOT"])
 for item in items:
     if not isinstance(item, dict) or item.get("name") != "personal":
         continue
-    path = item.get("path") or item.get("location")
-    source = item.get("source")
-    if not path and isinstance(source, dict):
-        path = source.get("path")
-    if path and os.path.realpath(path) == root:
+    paths = [item.get("root"), item.get("path"), item.get("location")]
+    for source in (item.get("source"), item.get("marketplaceSource")):
+        if isinstance(source, str):
+            paths.append(source)
+        elif isinstance(source, dict):
+            paths.extend((source.get("root"), source.get("path"), source.get("location")))
+            if isinstance(source.get("source"), str):
+                paths.append(source["source"])
+    if any(path and os.path.realpath(path) == root for path in paths):
         print("registered")
         raise SystemExit(0)
     print("conflict")
     raise SystemExit(3)
 print("missing")
 '
+}
+
+plugin_cache_state() {
+  local plugin_name="$1"
+  local manifest contents
+  for manifest in "$codex_home"/plugins/cache/**/.codex-plugin/plugin.json(N); do
+    contents="$(<"$manifest")"
+    if [[ "$contents" == *"\"name\": \"$plugin_name\""* ]]; then
+      print "installed"
+      return 0
+    fi
+  done
+  print "missing"
 }
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -136,7 +153,19 @@ fi
 print "Repository root: $repository_root"
 print "Codex command: $codex_command"
 
-marketplaces="$($codex_command plugin marketplace list --json)"
+if [[ "$mode" == "check" || "$mode" == "dry-run" ]]; then
+  print "Marketplace: unknown (Codex is not invoked in $mode mode)."
+  print "Superpowers: $(plugin_cache_state superpowers) in $codex_home"
+  print "personal-workflows: $(plugin_cache_state personal-workflows) in $codex_home"
+  if [[ "$mode" == "check" ]]; then
+    print "Check mode: no changes will be made."
+  else
+    print "Dry run: would install or verify Superpowers, register this marketplace, install personal-workflows, and run the profile installer."
+  fi
+  exit 0
+fi
+
+marketplaces="$(CODEX_HOME="$codex_home" "$codex_command" plugin marketplace list --json)"
 state="$(marketplace_state "$marketplaces")" || marketplace_status=$?
 if [[ "${marketplace_status:-0}" -eq 3 || "$state" == "conflict" ]]; then
   print -u2 "conflicting marketplace named personal is already registered; refusing to overwrite it"
@@ -145,30 +174,16 @@ elif [[ "${marketplace_status:-0}" -ne 0 ]]; then
   exit "$marketplace_status"
 fi
 
-if [[ "$mode" == "check" ]]; then
-  print "Check mode: no changes will be made. Marketplace: $state"
-  python3 "$profile_installer" --codex-home "$codex_home" --check
-  exit 0
-fi
-
-if [[ "$mode" == "dry-run" ]]; then
-  print "Dry run: would install or verify Superpowers."
-  [[ "$state" == "registered" ]] || print "Dry run: would add marketplace at $repository_root."
-  print "Dry run: would install personal-workflows@personal."
-  print "Dry run: would run install_profile.py --install, then --check for $codex_home."
-  exit 0
-fi
-
 print "This will install or verify Superpowers and personal-workflows, then update $codex_home."
 printf 'Continue? [y/N]: '
 IFS= read -r confirmation
 [[ "$confirmation" == "y" || "$confirmation" == "Y" ]] || { print "No changes made."; exit 0; }
 
-"$codex_command" plugin add superpowers@superpowers
+CODEX_HOME="$codex_home" "$codex_command" plugin add superpowers@openai-curated-remote
 if [[ "$state" == "missing" ]]; then
-  "$codex_command" plugin marketplace add "$repository_root"
+  CODEX_HOME="$codex_home" "$codex_command" plugin marketplace add "$repository_root"
 fi
-"$codex_command" plugin add personal-workflows@personal
+CODEX_HOME="$codex_home" "$codex_command" plugin add personal-workflows@personal
 python3 "$profile_installer" --codex-home "$codex_home" --install
 python3 "$profile_installer" --codex-home "$codex_home" --check
 print "Bootstrap complete. Start a new Codex task to use the installed workflows."

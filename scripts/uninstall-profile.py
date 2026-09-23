@@ -5,6 +5,8 @@ from __future__ import print_function
 
 import argparse
 import json
+import shutil
+import tempfile
 from pathlib import Path
 
 
@@ -68,16 +70,67 @@ def plan_uninstall(codex_home, plugin_root):
     }
 
 
+def _stage_path(path, codex_home, quarantine):
+    """Atomically move one managed artifact into the transaction quarantine."""
+    staged_path = quarantine / path.relative_to(codex_home)
+    staged_path.parent.mkdir(parents=True, exist_ok=True)
+    path.replace(staged_path)
+
+
+def _restore_quarantine(quarantine, paths, codex_home, original_contents):
+    """Move every staged artifact back to its original location after a failure."""
+    for path in reversed(paths):
+        staged_path = quarantine / path.relative_to(codex_home)
+        if staged_path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            staged_path.replace(path)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(original_contents[path])
+    if quarantine.exists():
+        try:
+            shutil.rmtree(str(quarantine))
+        except OSError:
+            pass
+
+
+def _delete_quarantine(quarantine):
+    """Permanently remove a fully staged profile only after every move succeeds."""
+    shutil.rmtree(str(quarantine))
+
+
 def uninstall_profile(codex_home, plugin_root, check_only):
     """Remove validated personal-workflows artifacts, or report the planned removal."""
     plan = plan_uninstall(codex_home, plugin_root)
-    if not check_only:
+    if check_only:
+        return {"guidance": plan["guidance"], "agents": plan["agents"]}
+
+    paths = list(plan["removals"])
+    if plan["guidance"] == "would-remove":
+        paths.insert(0, plan["guidance_path"])
+    if not paths:
+        return {"guidance": plan["guidance"], "agents": plan["agents"]}
+
+    original_contents = {path: path.read_bytes() for path in paths}
+    quarantine = Path(tempfile.mkdtemp(prefix=".personal-workflows-uninstall-", dir=str(codex_home)))
+    staged_paths = []
+    try:
         if plan["guidance"] == "would-remove":
+            _stage_path(plan["guidance_path"], codex_home, quarantine)
+            staged_paths.append(plan["guidance_path"])
             plan["guidance_path"].write_text(plan["remaining_guidance"], encoding="utf-8")
-            plan["guidance"] = "removed"
-        for destination in plan["removals"]:
-            destination.unlink()
-            plan["agents"][destination.name] = "removed"
+        for path in plan["removals"]:
+            _stage_path(path, codex_home, quarantine)
+            staged_paths.append(path)
+        _delete_quarantine(quarantine)
+    except OSError:
+        _restore_quarantine(quarantine, staged_paths, codex_home, original_contents)
+        raise
+
+    if plan["guidance"] == "would-remove":
+        plan["guidance"] = "removed"
+    for destination in plan["removals"]:
+        plan["agents"][destination.name] = "removed"
     return {"guidance": plan["guidance"], "agents": plan["agents"]}
 
 

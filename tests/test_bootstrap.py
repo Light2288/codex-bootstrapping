@@ -22,6 +22,7 @@ class BootstrapTest(unittest.TestCase):
         fake_bin.mkdir(exist_ok=True)
         log = temporary / "codex-calls.jsonl"
         fake_codex = fake_bin / "codex"
+        state_path = temporary / "marketplaces.json"
         fake_codex.write_text(
             "#!{python}\n"
             "import json\n"
@@ -30,16 +31,29 @@ class BootstrapTest(unittest.TestCase):
             "from pathlib import Path\n"
             "log = Path(os.environ['FAKE_CODEX_LOG'])\n"
             "with log.open('a', encoding='utf-8') as stream:\n"
-            "    stream.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+            "    stream.write(json.dumps({{'args': sys.argv[1:], 'codex_home': os.environ.get('CODEX_HOME')}}) + '\\n')\n"
             "if sys.argv[1:] == ['plugin', 'marketplace', 'list', '--json']:\n"
-            "    print(os.environ.get('FAKE_MARKETPLACES', '[]'))\n"
+            "    print(Path(os.environ['FAKE_MARKPLACES_PATH']).read_text(encoding='utf-8'))\n"
+            "elif sys.argv[1:3] == ['plugin', 'marketplace'] and sys.argv[3] == 'add':\n"
+            "    root = sys.argv[4]\n"
+            "    Path(os.environ['FAKE_MARKPLACES_PATH']).write_text(json.dumps({{'marketplaces': [{{'name': 'personal', 'root': root, 'marketplaceSource': {{'source': 'local', 'path': root}}}}]}}), encoding='utf-8')\n"
             "sys.exit(0)\n".format(python=sys.executable),
             encoding="utf-8",
         )
         fake_codex.chmod(0o755)
-        env = dict(os.environ, PATH=str(fake_bin) + os.pathsep + os.environ["PATH"], FAKE_CODEX_LOG=str(log))
+        if not state_path.exists():
+            state_path.write_text("[]", encoding="utf-8")
+        env = dict(
+            os.environ,
+            PATH=str(fake_bin) + os.pathsep + os.environ["PATH"],
+            FAKE_CODEX_LOG=str(log),
+            FAKE_MARKPLACES_PATH=str(state_path),
+        )
         if environment:
             env.update(environment)
+        if "FAKE_MARKETPLACES" in env:
+            state_path.write_text(env["FAKE_MARKETPLACES"], encoding="utf-8")
+        prior_lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
         result = subprocess.run(
             ["zsh", str(SCRIPT), "--codex-home", str(temporary / "codex-home"), *arguments],
             check=False,
@@ -49,9 +63,12 @@ class BootstrapTest(unittest.TestCase):
             env=env,
         )
         calls = []
+        homes = []
         if log.exists():
-            calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
-        return result, calls
+            entries = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()][len(prior_lines):]
+            calls = [entry["args"] for entry in entries]
+            homes = [entry["codex_home"] for entry in entries]
+        return result, calls, homes
 
     def test_bundled_codex_is_used_when_path_and_override_are_absent(self):
         """Removing bundled discovery would make a bundled-only Codex install unusable."""
@@ -108,18 +125,19 @@ class BootstrapTest(unittest.TestCase):
             temporary = Path(directory)
             for mode in ("--check", "--dry-run"):
                 with self.subTest(mode=mode):
-                    result, calls = self.run_bootstrap(temporary, mode)
+                    result, calls, _ = self.run_bootstrap(temporary, mode)
 
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertFalse((temporary / "codex-home").exists())
-                    self.assertFalse(any(call[:3] == ["plugin", "marketplace", "add"] for call in calls))
-                    self.assertFalse(any(call[:2] == ["plugin", "add"] for call in calls))
+                    self.assertEqual(calls, [])
+                    self.assertIn("Superpowers: missing", result.stdout)
+                    self.assertIn("personal-workflows: missing", result.stdout)
 
     def test_bootstrap_derives_the_repository_root_from_its_script_location(self):
         """Using the caller's directory would register the wrong marketplace after cd."""
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)
-            result, _ = self.run_bootstrap(temporary, "--dry-run")
+            result, _, _ = self.run_bootstrap(temporary, "--dry-run")
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn(str(ROOT), result.stdout)
@@ -128,12 +146,12 @@ class BootstrapTest(unittest.TestCase):
         """Overwriting a same-named marketplace could replace another user's plugin source."""
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)
-            result, calls = self.run_bootstrap(
+            result, calls, _ = self.run_bootstrap(
                 temporary,
-                "--check",
+                input_text="y\n",
                 environment={
                     "FAKE_MARKETPLACES": json.dumps(
-                        [{"name": "personal", "path": "/unrelated/marketplace"}]
+                        {"marketplaces": [{"name": "personal", "root": "/unrelated/marketplace"}]}
                     )
                 },
             )
@@ -146,8 +164,8 @@ class BootstrapTest(unittest.TestCase):
         """Skipping explicit install/check modes would make profile changes unsafe or unverifiable."""
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)
-            first, first_calls = self.run_bootstrap(temporary, input_text="y\n")
-            second, second_calls = self.run_bootstrap(temporary, input_text="y\n")
+            first, first_calls, first_homes = self.run_bootstrap(temporary, input_text="y\n")
+            second, second_calls, second_homes = self.run_bootstrap(temporary, input_text="y\n")
             home = temporary / "codex-home"
 
             self.assertEqual(first.returncode, 0, first.stderr)
@@ -155,9 +173,54 @@ class BootstrapTest(unittest.TestCase):
             self.assertTrue((home / "AGENTS.md").exists())
             self.assertEqual((home / "AGENTS.md").read_text(encoding="utf-8").count("<!-- personal-workflows:start -->"), 1)
             self.assertIn(["plugin", "marketplace", "add", str(ROOT)], first_calls)
+            self.assertIn(["plugin", "add", "superpowers@openai-curated-remote"], first_calls)
             self.assertIn(["plugin", "add", "personal-workflows@personal"], first_calls)
+            self.assertNotIn(["plugin", "marketplace", "add", str(ROOT)], second_calls)
+            self.assertEqual(first_homes, [str(home)] * len(first_homes))
+            self.assertEqual(second_homes, [str(home)] * len(second_homes))
             self.assertNotIn("configure-provider", first.stdout + first.stderr + second.stdout + second.stderr)
             self.assertTrue(PROFILE_INSTALLER.exists())
+
+    def test_real_schema_registration_is_idempotent(self):
+        """Ignoring root/marketplaceSource would re-add an already-correct marketplace."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            (temporary / "marketplaces.json").write_text(
+                json.dumps(
+                    {
+                        "marketplaces": [
+                            {
+                                "name": "personal",
+                                "root": str(ROOT),
+                                "marketplaceSource": {"source": "local", "path": str(ROOT)},
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result, calls, _ = self.run_bootstrap(temporary, input_text="y\n")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn(["plugin", "marketplace", "add", str(ROOT)], calls)
+
+    def test_check_reports_target_home_dependency_state_without_starting_codex(self):
+        """Starting Codex during inspection could mutate a caller's active home."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            cache = temporary / "codex-home" / "plugins" / "cache" / "openai-curated-remote"
+            for name in ("superpowers", "personal-workflows"):
+                manifest = cache / name / "1.0.0" / ".codex-plugin" / "plugin.json"
+                manifest.parent.mkdir(parents=True)
+                manifest.write_text(json.dumps({"name": name}), encoding="utf-8")
+
+            result, calls, _ = self.run_bootstrap(temporary, "--check")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(calls, [])
+            self.assertIn("Superpowers: installed", result.stdout)
+            self.assertIn("personal-workflows: installed", result.stdout)
 
 
 if __name__ == "__main__":

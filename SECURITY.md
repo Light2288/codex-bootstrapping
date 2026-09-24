@@ -25,6 +25,7 @@ path; the transformer is invoked only to validate the provider ID.
 Models-only reconfiguration never accesses Keychain or plugin caches. It
 requires exact `personal-workflows` ownership markers, refuses symlinked or
 malformed targets, and uses backups, atomic pathname exchange, verified
-post-replacement identities, and durable owner/transaction metadata. A later
-run recovers a stale interrupted transaction before applying new assignments;
+post-replacement identities, a persistent lock inode, and atomically replaced
+checksummed transaction metadata. A later run rejects corrupt metadata or
+recovers a stale interrupted transaction before applying new assignments;
 unexpected external target content is preserved rather than overwritten.

@@ -93,12 +93,17 @@ write. `--config` identifies the exact configuration filename; models-only
 mode never silently substitutes a sibling `config.toml`. Changed files receive
 collision-safe sibling backups and are replaced with atomic pathname exchange.
 The transaction records the owner, phase, targets, backups, desired hashes,
-and post-replacement identities durably in
-`.provider-model-routing.lock`. If the owner is terminated, the next run takes
-the released operating-system lock, verifies the journal and backups, restores
-the pre-transaction bytes, and only then starts a fresh update. An unexpected
-external target swap or edit is preserved and recovery stops safely instead of
-overwriting it; do not delete the journal to bypass that refusal. Unrelated
+and post-replacement identities in a checksummed
+`.provider-model-routing.journal`. Journal rewrites use a synced sibling file,
+atomic replacement, and a directory sync, so termination leaves either the
+previous complete record or the next complete record. The persistent
+`.provider-model-routing.lock` supplies one stable operating-system lock inode
+and contains no journal data. If the owner is terminated, the next run takes
+the released lock, verifies the journal and backups, restores the
+pre-transaction bytes, and only then starts a fresh update. Nonempty legacy
+lock journals are migrated before recovery. An unexpected external target
+swap or edit, or an invalid journal checksum, stops recovery safely instead of
+overwriting data; do not delete the journal to bypass that refusal. Unrelated
 configuration, guidance, agents, and plugin caches are outside this mode's
 write set. Supported full/light overrides remain valid through profile checks
 and bootstrap reinstalls. The two focused modes cannot be combined, and

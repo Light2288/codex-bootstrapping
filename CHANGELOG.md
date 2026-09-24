@@ -7,7 +7,8 @@
   quality review gate (Sol by default).
 - Add mutually exclusive credential-only and models-only provider
   reconfiguration. Model updates are ownership-bounded, backed up, atomic, and
-  recoverable after stale-owner termination; credential rotation remains
+  recoverable after stale-owner or journal-write termination through a stable
+  lock and atomically replaced checksummed journal; credential rotation remains
   hidden and Keychain-only.
 
 All notable changes to this project are documented in this file.

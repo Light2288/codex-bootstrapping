@@ -44,11 +44,12 @@ full/light routing after the profile is installed, use
 `zsh scripts/configure-provider.zsh --models-only`. The latter validates all
 owned targets before writing, creates sibling backups, applies atomic
 pathname exchanges, and rolls already-written files back if the transaction
-fails. Durable owner metadata lets a later run recover a process that was
-terminated mid-update without manually deleting a lock. It refuses missing,
-malformed, symlinked, unmanaged, or externally changed targets instead of
-overwriting them. Supported custom assignments are normalized through later
-profile checks and bootstrap reinstalls. See
+fails. A persistent lock file coordinates writers, while a separate
+atomically replaced checksummed journal lets a later run recover a process
+terminated during either a target update or a journal update. It refuses
+missing, malformed, symlinked, unmanaged, corrupt-journal, or externally
+changed targets instead of overwriting them. Supported custom assignments are
+normalized through later profile checks and bootstrap reinstalls. See
 [provider configuration](provider-configuration.md) for the prompts and exact
 assignment rules.
 

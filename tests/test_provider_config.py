@@ -1101,8 +1101,11 @@ class ProviderConfigTest(unittest.TestCase):
 
             self.assertEqual(target.read_bytes(), external_edit)
             lock = codex_home / ".provider-model-routing.lock"
+            journal = codex_home / ".provider-model-routing.journal"
             self.assertTrue(lock.exists())
-            self.assertTrue(lock.read_bytes())
+            self.assertEqual(lock.read_bytes(), b"")
+            self.assertTrue(journal.exists())
+            self.assertTrue(journal.read_bytes())
 
     def test_models_only_recovers_an_empty_stale_lock_before_updating(self):
         """An unheld empty legacy lock must not require blind manual deletion."""
@@ -1117,7 +1120,144 @@ class ProviderConfigTest(unittest.TestCase):
                 "recovered-light",
             )
 
-            self.assertFalse(lock.exists())
+            self.assertTrue(lock.exists())
+            self.assertEqual(lock.read_bytes(), b"")
+            self.assertFalse((codex_home / ".provider-model-routing.journal").exists())
+            self.assertIn(
+                'model = "recovered-full"',
+                (codex_home / "config.toml").read_text(encoding="utf-8"),
+            )
+
+    def test_models_only_migrates_a_nonempty_legacy_lock_journal(self):
+        """Upgrading must not discard recovery metadata stored in the old lock file."""
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = self.create_managed_codex_home(Path(directory))
+            lock = codex_home / ".provider-model-routing.lock"
+            legacy = {
+                "version": 1,
+                "transaction_id": "legacy-interrupted",
+                "owner": {"pid": 999999},
+                "phase": "recovery-required",
+                "targets": [
+                    {
+                        "path": "config.toml",
+                        "backup": None,
+                        "original_sha256": "0" * 64,
+                        "desired_sha256": "1" * 64,
+                        "mode": 0o600,
+                        "parent_identity": [],
+                        "installed_identity": None,
+                        "displaced": None,
+                    }
+                ],
+            }
+            lock.write_text(json.dumps(legacy) + "\n", encoding="utf-8")
+            target = codex_home / "config.toml"
+            before = target.read_bytes()
+
+            with self.assertRaisesRegex(ValidationError, "lacks a recovery backup"):
+                provider_config.apply_model_routing_update(
+                    codex_home,
+                    "recovered-full",
+                    "recovered-light",
+                )
+
+            self.assertEqual(target.read_bytes(), before)
+            self.assertEqual(lock.read_bytes(), b"")
+            journal = codex_home / ".provider-model-routing.journal"
+            envelope = json.loads(journal.read_text(encoding="utf-8"))
+            self.assertEqual(envelope["payload"]["transaction_id"], "legacy-interrupted")
+
+    def test_models_only_rejects_a_corrupted_atomic_journal(self):
+        """A corrupt recovery journal must never be mistaken for no transaction."""
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = self.create_managed_codex_home(Path(directory))
+            lock = codex_home / ".provider-model-routing.lock"
+            lock.touch(mode=0o600)
+            journal = codex_home / ".provider-model-routing.journal"
+            corrupt = {
+                "journal_version": 1,
+                "payload": {
+                    "version": 1,
+                    "transaction_id": "interrupted",
+                    "owner": {"pid": 999999},
+                    "phase": "backups",
+                    "targets": [],
+                },
+                "sha256": "0" * 64,
+            }
+            journal.write_text(json.dumps(corrupt) + "\n", encoding="utf-8")
+            before = self.tree_contents(codex_home)
+
+            with self.assertRaisesRegex(ValidationError, "checksum"):
+                provider_config.apply_model_routing_update(
+                    codex_home,
+                    "recovered-full",
+                    "recovered-light",
+                )
+
+            self.assertEqual(self.tree_contents(codex_home), before)
+
+    def test_models_only_recovers_when_killed_during_journal_rewrite(self):
+        """Killing a journal rewrite must leave the prior complete recovery record."""
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = self.create_managed_codex_home(Path(directory))
+            child_code = """
+import os
+import signal
+from pathlib import Path
+import scripts.provider_config as provider_config
+
+home = Path(os.environ["TEST_CODEX_HOME"])
+real_replace = provider_config._atomic_replace_content_at
+real_write_all = provider_config._write_all
+armed = {"value": False}
+
+def replace_then_arm(directory_descriptor, state, content):
+    result = real_replace(directory_descriptor, state, content)
+    armed["value"] = True
+    return result
+
+def terminate_during_next_write(descriptor, content):
+    if armed["value"]:
+        os.kill(os.getpid(), signal.SIGKILL)
+    return real_write_all(descriptor, content)
+
+provider_config._atomic_replace_content_at = replace_then_arm
+provider_config._write_all = terminate_during_next_write
+provider_config.apply_model_routing_update(home, "recovered-full", "recovered-light")
+"""
+            child = subprocess.run(
+                [sys.executable, "-c", child_code],
+                check=False,
+                capture_output=True,
+                text=True,
+                cwd=ROOT,
+                env=dict(os.environ, TEST_CODEX_HOME=str(codex_home)),
+            )
+
+            self.assertEqual(child.returncode, -signal.SIGKILL)
+            lock = codex_home / ".provider-model-routing.lock"
+            journal_path = codex_home / ".provider-model-routing.journal"
+            self.assertTrue(lock.exists())
+            self.assertEqual(lock.read_bytes(), b"")
+            envelope = json.loads(journal_path.read_text(encoding="utf-8"))
+            self.assertEqual(envelope["journal_version"], 1)
+            self.assertEqual(envelope["payload"]["phase"], "applying")
+            self.assertEqual(len(envelope["sha256"]), 64)
+
+            provider_config.apply_model_routing_update(
+                codex_home,
+                "recovered-full",
+                "recovered-light",
+            )
+
+            self.assertTrue(lock.exists())
+            self.assertEqual(lock.read_bytes(), b"")
+            self.assertFalse(journal_path.exists())
+            self.assertFalse(
+                list(codex_home.glob(".provider-model-routing.journal.tmp.*"))
+            )
             self.assertIn(
                 'model = "recovered-full"',
                 (codex_home / "config.toml").read_text(encoding="utf-8"),
@@ -1158,9 +1298,13 @@ provider_config.apply_model_routing_update(home, "recovered-full", "recovered-li
 
             self.assertEqual(child.returncode, -signal.SIGKILL)
             lock = codex_home / ".provider-model-routing.lock"
+            journal_path = codex_home / ".provider-model-routing.journal"
             self.assertTrue(lock.exists())
-            self.assertTrue(lock.read_bytes())
-            journal = json.loads(lock.read_text(encoding="utf-8"))
+            self.assertEqual(lock.read_bytes(), b"")
+            envelope = json.loads(journal_path.read_text(encoding="utf-8"))
+            self.assertEqual(envelope["journal_version"], 1)
+            self.assertEqual(len(envelope["sha256"]), 64)
+            journal = envelope["payload"]
             self.assertEqual(journal["version"], 1)
             self.assertEqual(journal["phase"], "applying")
             self.assertIsInstance(journal["owner"]["pid"], int)
@@ -1176,7 +1320,9 @@ provider_config.apply_model_routing_update(home, "recovered-full", "recovered-li
                 "recovered-light",
             )
 
-            self.assertFalse(lock.exists())
+            self.assertTrue(lock.exists())
+            self.assertEqual(lock.read_bytes(), b"")
+            self.assertFalse(journal_path.exists())
             self.assertIn(
                 'model = "recovered-full"',
                 (codex_home / "config.toml").read_text(encoding="utf-8"),

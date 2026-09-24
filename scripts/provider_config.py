@@ -804,49 +804,176 @@ def plan_model_routing_update(codex_home, full_model, light_model):
     return _build_model_routing_plan(codex_home, full_model, light_model).updates
 
 
-def _collision_safe_backup(destination):
+def _open_model_routing_directories(codex_home):
+    required = ("O_DIRECTORY", "O_NOFOLLOW")
+    if any(not hasattr(os, name) for name in required):
+        raise ValidationError("models-only updates require no-follow directory support")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    root = Path(codex_home).resolve()
+    root_descriptor = os.open(str(root), flags)
+    try:
+        agents_descriptor = os.open("agents", flags, dir_fd=root_descriptor)
+    except Exception:
+        os.close(root_descriptor)
+        raise
+    return {
+        root: root_descriptor,
+        root / "agents": agents_descriptor,
+    }
+
+
+def _close_model_routing_directories(directory_descriptors):
+    for descriptor in reversed(list(directory_descriptors.values())):
+        os.close(descriptor)
+
+
+def _directory_descriptor_for(state, directory_descriptors):
+    try:
+        descriptor = directory_descriptors[state.path.parent]
+    except KeyError:
+        raise ValidationError("managed target parent is not approved: {0}".format(state.path))
+    expected = dict(state.parent_identities)[state.path.parent]
+    status = os.fstat(descriptor)
+    current = (status.st_dev, status.st_ino, status.st_mode)
+    if current != expected:
+        raise ValidationError("managed target parent changed during update: {0}".format(state.path))
+    return descriptor
+
+
+def _file_identity_from_descriptor(descriptor):
+    status = os.fstat(descriptor)
+    if not stat.S_ISREG(status.st_mode):
+        raise ValidationError("managed target is no longer a regular file")
+    return (
+        status.st_dev,
+        status.st_ino,
+        status.st_mode,
+        status.st_size,
+        status.st_mtime_ns,
+        status.st_ctime_ns,
+    )
+
+
+def _open_verified_file_at(directory_descriptor, state):
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    descriptor = os.open(state.path.name, flags, dir_fd=directory_descriptor)
+    try:
+        if _file_identity_from_descriptor(descriptor) != state.identity:
+            raise ValidationError("managed target changed during update: {0}".format(state.path))
+    except Exception:
+        os.close(descriptor)
+        raise
+    return descriptor
+
+
+def _create_temporary_file_at(directory_descriptor, prefix):
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    for _attempt in range(100):
+        name = ".{0}.{1}".format(prefix, next(tempfile._get_candidate_names()))
+        try:
+            descriptor = os.open(name, flags, 0o600, dir_fd=directory_descriptor)
+        except FileExistsError:
+            continue
+        return name, descriptor
+    raise OSError("could not allocate a collision-safe temporary file")
+
+
+def _write_all(descriptor, content):
+    view = memoryview(content)
+    while view:
+        written = os.write(descriptor, view)
+        if written == 0:
+            raise OSError("short write while updating managed model routing")
+        view = view[written:]
+
+
+def _collision_safe_backup_at(directory_descriptor, state):
     sequence = 1
     while True:
-        backup = destination.with_name("{0}.backup.{1}".format(destination.name, sequence))
-        if not backup.exists() and not backup.is_symlink():
-            shutil.copy2(str(destination), str(backup))
-            return backup
-        sequence += 1
+        backup_name = "{0}.backup.{1}".format(state.path.name, sequence)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+        try:
+            backup_descriptor = os.open(
+                backup_name,
+                flags,
+                state.mode,
+                dir_fd=directory_descriptor,
+            )
+        except FileExistsError:
+            sequence += 1
+            continue
+        source_descriptor = None
+        try:
+            source_descriptor = _open_verified_file_at(directory_descriptor, state)
+            while True:
+                chunk = os.read(source_descriptor, 1024 * 1024)
+                if not chunk:
+                    break
+                _write_all(backup_descriptor, chunk)
+            os.fchmod(backup_descriptor, state.mode)
+            os.fsync(backup_descriptor)
+        except Exception:
+            try:
+                os.unlink(backup_name, dir_fd=directory_descriptor)
+            except OSError:
+                pass
+            raise
+        finally:
+            if source_descriptor is not None:
+                os.close(source_descriptor)
+            os.close(backup_descriptor)
+        return state.path.with_name(backup_name)
 
 
-def _atomic_replace_content(destination, content):
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=".{0}.".format(destination.name), dir=str(destination.parent)
+def _atomic_replace_content_at(directory_descriptor, state, content):
+    source_descriptor = _open_verified_file_at(directory_descriptor, state)
+    os.close(source_descriptor)
+    temporary_name, temporary_descriptor = _create_temporary_file_at(
+        directory_descriptor, state.path.name
     )
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as temporary:
-            temporary.write(content)
-            temporary.flush()
-            os.fsync(temporary.fileno())
-        os.chmod(temporary_name, destination.stat().st_mode & 0o777)
-        os.replace(temporary_name, str(destination))
+        _write_all(temporary_descriptor, content.encode("utf-8"))
+        os.fchmod(temporary_descriptor, state.mode)
+        os.fsync(temporary_descriptor)
+        os.close(temporary_descriptor)
+        temporary_descriptor = None
+        os.replace(
+            temporary_name,
+            state.path.name,
+            src_dir_fd=directory_descriptor,
+            dst_dir_fd=directory_descriptor,
+        )
     except Exception:
+        if temporary_descriptor is not None:
+            os.close(temporary_descriptor)
         try:
-            os.unlink(temporary_name)
+            os.unlink(temporary_name, dir_fd=directory_descriptor)
         except OSError:
             pass
         raise
 
 
-def _atomic_restore_bytes(destination, content, mode):
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=".{0}.rollback.".format(destination.name), dir=str(destination.parent)
+def _atomic_restore_bytes_at(directory_descriptor, state):
+    temporary_name, temporary_descriptor = _create_temporary_file_at(
+        directory_descriptor, "{0}.rollback".format(state.path.name)
     )
     try:
-        with os.fdopen(descriptor, "wb") as temporary:
-            temporary.write(content)
-            temporary.flush()
-            os.fsync(temporary.fileno())
-        os.chmod(temporary_name, mode)
-        os.replace(temporary_name, str(destination))
+        _write_all(temporary_descriptor, state.content)
+        os.fchmod(temporary_descriptor, state.mode)
+        os.fsync(temporary_descriptor)
+        os.close(temporary_descriptor)
+        temporary_descriptor = None
+        os.replace(
+            temporary_name,
+            state.path.name,
+            src_dir_fd=directory_descriptor,
+            dst_dir_fd=directory_descriptor,
+        )
     except Exception:
+        if temporary_descriptor is not None:
+            os.close(temporary_descriptor)
         try:
-            os.unlink(temporary_name)
+            os.unlink(temporary_name, dir_fd=directory_descriptor)
         except OSError:
             pass
         raise
@@ -879,28 +1006,39 @@ def apply_model_routing_update(codex_home, full_model, light_model):
     """Back up and atomically apply one validated multi-file routing transaction."""
     codex_home = Path(codex_home).resolve()
     lock_path, lock_descriptor, lock_identity = _acquire_model_routing_lock(codex_home)
+    directory_descriptors = None
     try:
+        directory_descriptors = _open_model_routing_directories(codex_home)
         plan = _build_model_routing_plan(codex_home, full_model, light_model)
         updates = plan.updates
-        originals = {
-            path: (plan.states[path].content, plan.states[path].mode) for path in updates
-        }
         backups = {}
         for path in updates:
-            _assert_managed_file_unchanged(plan.states[path])
-            backups[path] = _collision_safe_backup(path)
+            state = plan.states[path]
+            _assert_managed_file_unchanged(state)
+            directory_descriptor = _directory_descriptor_for(
+                state, directory_descriptors
+            )
+            backups[path] = _collision_safe_backup_at(directory_descriptor, state)
+            _assert_parent_identities(state)
         replaced = []
         try:
             for path, content in updates.items():
-                _assert_managed_file_unchanged(plan.states[path])
-                _atomic_replace_content(path, content)
+                state = plan.states[path]
+                _assert_managed_file_unchanged(state)
+                directory_descriptor = _directory_descriptor_for(
+                    state, directory_descriptors
+                )
+                _atomic_replace_content_at(directory_descriptor, state, content)
                 replaced.append(path)
+                _assert_parent_identities(state)
         except Exception as error:
             try:
                 for path in reversed(replaced):
-                    _assert_parent_identities(plan.states[path])
-                    content, mode = originals[path]
-                    _atomic_restore_bytes(path, content, mode)
+                    state = plan.states[path]
+                    directory_descriptor = _directory_descriptor_for(
+                        state, directory_descriptors
+                    )
+                    _atomic_restore_bytes_at(directory_descriptor, state)
             except Exception as rollback_error:
                 raise OSError(
                     "model routing update failed and rollback was incomplete: {0}".format(
@@ -910,6 +1048,8 @@ def apply_model_routing_update(codex_home, full_model, light_model):
             raise
         return backups
     finally:
+        if directory_descriptors is not None:
+            _close_model_routing_directories(directory_descriptors)
         _release_model_routing_lock(lock_path, lock_descriptor, lock_identity)
 
 

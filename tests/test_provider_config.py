@@ -810,11 +810,11 @@ class ProviderConfigTest(unittest.TestCase):
             real_replace = os.replace
             calls = {"count": 0}
 
-            def fail_third_replace(source, destination):
+            def fail_third_replace(source, destination, *args, **kwargs):
                 calls["count"] += 1
                 if calls["count"] == 3:
                     raise OSError("injected atomic replacement failure")
-                return real_replace(source, destination)
+                return real_replace(source, destination, *args, **kwargs)
 
             with patch.object(provider_config.os, "replace", side_effect=fail_third_replace):
                 with self.assertRaises(OSError):
@@ -908,11 +908,11 @@ class ProviderConfigTest(unittest.TestCase):
             agents = codex_home / "agents"
             outside_agents = temporary / "outside-agents"
             outside_before = self.tree_contents(agents)
-            real_replace_content = provider_config._atomic_replace_content
+            real_replace_content = provider_config._atomic_replace_content_at
             replacements = {"count": 0}
 
-            def replace_then_swap(destination, content):
-                result = real_replace_content(destination, content)
+            def replace_then_swap(directory_descriptor, state, content):
+                result = real_replace_content(directory_descriptor, state, content)
                 replacements["count"] += 1
                 if replacements["count"] == 1:
                     agents.rename(outside_agents)
@@ -921,7 +921,7 @@ class ProviderConfigTest(unittest.TestCase):
 
             with patch.object(
                 provider_config,
-                "_atomic_replace_content",
+                "_atomic_replace_content_at",
                 side_effect=replace_then_swap,
             ):
                 with self.assertRaisesRegex(ValidationError, "changed"):
@@ -936,6 +936,57 @@ class ProviderConfigTest(unittest.TestCase):
             outside_after = self.tree_contents(outside_agents)
             for relative, contents in outside_before.items():
                 self.assertEqual(outside_after[relative], contents, relative)
+
+    def test_models_only_never_follows_parent_swap_after_final_validation(self):
+        """Mutation must use stable directories even if the pathname changes after checking."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            codex_home = self.create_managed_codex_home(temporary)
+            agents = codex_home / "agents"
+            validated_agents_path = agents.resolve()
+            moved_agents = temporary / "moved-validated-agents"
+            attack_target = temporary / "attack-target"
+            original_agents = self.tree_contents(agents)
+            attack_target.mkdir()
+            for relative, contents in original_agents.items():
+                destination = attack_target / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(contents)
+            attack_before = self.tree_contents(attack_target)
+            real_assert = provider_config._assert_managed_file_unchanged
+            swapped = {"done": False}
+            agent_validations = {"count": 0}
+
+            def validate_then_swap(state):
+                result = real_assert(state)
+                if state.path.parent == validated_agents_path:
+                    agent_validations["count"] += 1
+                if (
+                    agent_validations["count"] == len(self.managed_agent_models) + 1
+                    and not swapped["done"]
+                ):
+                    agents.rename(moved_agents)
+                    agents.symlink_to(attack_target, target_is_directory=True)
+                    swapped["done"] = True
+                return result
+
+            with patch.object(
+                provider_config,
+                "_assert_managed_file_unchanged",
+                side_effect=validate_then_swap,
+            ):
+                with self.assertRaises((ValidationError, OSError)):
+                    provider_config.apply_model_routing_update(
+                        codex_home,
+                        "gpt-5.6-sol",
+                        "gpt-5.6-luna",
+                    )
+
+            self.assertTrue(swapped["done"])
+            self.assertEqual(self.tree_contents(attack_target), attack_before)
+            moved_after = self.tree_contents(moved_agents)
+            for relative, contents in original_agents.items():
+                self.assertEqual(moved_after[relative], contents, relative)
 
 
 if __name__ == "__main__":

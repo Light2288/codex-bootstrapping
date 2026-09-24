@@ -8,7 +8,9 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+import scripts.provider_config as provider_config
 from scripts.provider_config import (
     DEFAULT_SETTINGS,
     ProviderSettings,
@@ -27,6 +29,60 @@ WRAPPER = ROOT / "scripts" / "configure-provider.zsh"
 
 class ProviderConfigTest(unittest.TestCase):
     """The tests name configuration errors that must be caught before writes."""
+
+    managed_agent_models = {
+        "doc-analyst.toml": "gpt-5.6-sol",
+        "document-worker.toml": "gpt-5.6-sol",
+        "review-audit.toml": "gpt-5.6-sol",
+        "review-quality.toml": "gpt-5.6-sol",
+        "review-spec.toml": "gpt-5.6-luna",
+    }
+
+    def create_managed_codex_home(self, root):
+        codex_home = root / "codex-home"
+        agents = codex_home / "agents"
+        plugin_cache = codex_home / "plugins" / "cache" / "sentinel"
+        agents.mkdir(parents=True)
+        plugin_cache.mkdir(parents=True)
+        (plugin_cache / "untouched.txt").write_text("cache sentinel\n", encoding="utf-8")
+        (codex_home / "config.toml").write_text(
+            'model = "old-full"\n'
+            'model_reasoning_effort = "high"\n'
+            'model_provider = "ibm_ica"\n\n'
+            '[model_providers.ibm_ica]\n'
+            'name = "Keep Provider"\n'
+            'base_url = "https://provider.example/v1"\n',
+            encoding="utf-8",
+        )
+        (codex_home / "AGENTS.md").write_text(
+            "unmanaged prefix\n"
+            "<!-- personal-workflows:start -->\n"
+            "## Managed model routing\n\n"
+            "- `full`: `old-full`\n"
+            "- `light`: `old-light`\n"
+            "<!-- personal-workflows:end -->\n"
+            "unmanaged suffix\n",
+            encoding="utf-8",
+        )
+        for filename in self.managed_agent_models:
+            name = filename[:-5]
+            (agents / filename).write_text(
+                "# Managed by personal-workflows\n"
+                'name = "{0}"\n'
+                'description = "keep {0}"\n'
+                'model = "old-model"\n'
+                'model_reasoning_effort = "high"\n'.format(name),
+                encoding="utf-8",
+            )
+        return codex_home
+
+    @staticmethod
+    def tree_contents(root):
+        return {
+            path.relative_to(root): path.read_bytes()
+            for path in root.rglob("*")
+            if path.is_file()
+        }
 
     def test_ibm_defaults_render_the_reviewed_keychain_provider_configuration(self):
         """Removing any reviewed default or changing its value is a bug."""
@@ -558,6 +614,260 @@ class ProviderConfigTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Keychain helper", result.stderr)
             self.assertEqual(target.read_text(encoding="utf-8"), 'approval_policy = "on-request"\n')
+
+    def test_credential_only_replaces_keychain_secret_without_changing_codex_files(self):
+        """A focused credential rotation must not rewrite provider or routing configuration."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            codex_home = self.create_managed_codex_home(temporary)
+            before = self.tree_contents(codex_home)
+            state = temporary / "keychain-state"
+            operations = temporary / "keychain-operations"
+            arguments = temporary / "keychain-arguments"
+            helper = temporary / "fake-keychain-helper"
+            secret = "focused-secret-value"
+            helper.write_text(
+                "#!{0}\n"
+                "import os\n"
+                "import sys\n"
+                "from pathlib import Path\n"
+                "state = Path(os.environ['FAKE_KEYCHAIN_STATE'])\n"
+                "operation = sys.argv[1]\n"
+                "open(os.environ['FAKE_KEYCHAIN_OPERATIONS'], 'a').write(operation + '\\n')\n"
+                "open(os.environ['FAKE_KEYCHAIN_ARGUMENTS'], 'a').write('\\0'.join(sys.argv[1:]) + '\\n')\n"
+                "if operation == 'check': sys.exit(0)\n"
+                "if operation == 'get': sys.exit(44)\n"
+                "if operation == 'set': state.write_bytes(sys.stdin.buffer.read())\n"
+                "if operation == 'delete' and state.exists(): state.unlink()\n".format(sys.executable),
+                encoding="utf-8",
+            )
+            helper.chmod(0o755)
+
+            result = subprocess.run(
+                ["zsh", str(WRAPPER), "--credential-only"],
+                check=False,
+                capture_output=True,
+                input="\ny\n{0}\n".format(secret),
+                text=True,
+                env=dict(
+                    os.environ,
+                    CODEX_HOME=str(codex_home),
+                    CODEX_PROVIDER_KEYCHAIN_HELPER=str(helper),
+                    FAKE_KEYCHAIN_STATE=str(state),
+                    FAKE_KEYCHAIN_OPERATIONS=str(operations),
+                    FAKE_KEYCHAIN_ARGUMENTS=str(arguments),
+                ),
+            )
+
+            self.assertEqual(result.returncode, 0, (result.stdout, result.stderr))
+            self.assertEqual(self.tree_contents(codex_home), before)
+            self.assertEqual(state.read_text(encoding="utf-8"), secret)
+            self.assertEqual(
+                operations.read_text(encoding="utf-8").splitlines(),
+                ["check", "get", "set"],
+            )
+            self.assertNotIn(secret, arguments.read_text(encoding="utf-8"))
+            self.assertNotIn(secret, result.stdout)
+            self.assertNotIn(secret, result.stderr)
+
+    def test_models_only_updates_exact_owned_targets_with_backups_and_no_keychain(self):
+        """Wrong role mapping or broad writes would silently route work to the wrong model."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            codex_home = self.create_managed_codex_home(temporary)
+            before = self.tree_contents(codex_home)
+            helper_log = temporary / "helper-called"
+            helper = temporary / "fake-keychain-helper"
+            helper.write_text(
+                "#!{0}\nfrom pathlib import Path\nPath({1!r}).write_text('called')\n".format(
+                    sys.executable, str(helper_log)
+                ),
+                encoding="utf-8",
+            )
+            helper.chmod(0o755)
+
+            result = subprocess.run(
+                ["zsh", str(WRAPPER), "--models-only"],
+                check=False,
+                capture_output=True,
+                input="\n\ny\n",
+                text=True,
+                env=dict(
+                    os.environ,
+                    CODEX_HOME=str(codex_home),
+                    CODEX_PROVIDER_KEYCHAIN_HELPER=str(helper),
+                ),
+            )
+
+            self.assertEqual(result.returncode, 0, (result.stdout, result.stderr))
+            self.assertFalse(helper_log.exists())
+            config = (codex_home / "config.toml").read_text(encoding="utf-8")
+            self.assertIn('model = "gpt-5.6-sol"\n', config)
+            self.assertIn('base_url = "https://provider.example/v1"\n', config)
+            guidance = (codex_home / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertIn("unmanaged prefix\n", guidance)
+            self.assertIn("unmanaged suffix\n", guidance)
+            self.assertIn("- `full`: `gpt-5.6-sol`\n", guidance)
+            self.assertIn("- `light`: `gpt-5.6-luna`\n", guidance)
+            for filename, expected_model in self.managed_agent_models.items():
+                with self.subTest(filename=filename):
+                    contents = (codex_home / "agents" / filename).read_text(encoding="utf-8")
+                    self.assertIn('model = "{0}"\n'.format(expected_model), contents)
+                    backups = list((codex_home / "agents").glob(filename + ".backup.*"))
+                    self.assertEqual(len(backups), 1)
+                    self.assertEqual(backups[0].read_bytes(), before[Path("agents") / filename])
+            for relative in (Path("config.toml"), Path("AGENTS.md")):
+                backups = list((codex_home / relative.parent).glob(relative.name + ".backup.*"))
+                self.assertEqual(len(backups), 1)
+                self.assertEqual(backups[0].read_bytes(), before[relative])
+            self.assertEqual(
+                (codex_home / "plugins" / "cache" / "sentinel" / "untouched.txt").read_text(
+                    encoding="utf-8"
+                ),
+                "cache sentinel\n",
+            )
+
+    def test_focused_modes_are_mutually_exclusive_before_any_mutation(self):
+        """Selecting two focused modes must fail rather than choose an unsafe implicit order."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            codex_home = self.create_managed_codex_home(temporary)
+            before = self.tree_contents(codex_home)
+            result = subprocess.run(
+                [
+                    "zsh",
+                    str(WRAPPER),
+                    "--credential-only",
+                    "--models-only",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=dict(os.environ, CODEX_HOME=str(codex_home)),
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("cannot be combined", result.stderr)
+            self.assertEqual(self.tree_contents(codex_home), before)
+
+    def test_models_only_refuses_unmanaged_or_malformed_targets_without_partial_writes(self):
+        """Ownership or structure ambiguity must stop the transaction before the first backup."""
+        mutations = {
+            "malformed-config-value": lambda home: (home / "config.toml").write_text(
+                'model = "unterminated\n', encoding="utf-8"
+            ),
+            "unmanaged-agent": lambda home: (home / "agents" / "review-audit.toml").write_text(
+                'name = "review-audit"\nmodel = "user-choice"\n', encoding="utf-8"
+            ),
+            "malformed-agent-table": lambda home: (
+                home / "agents" / "review-audit.toml"
+            ).write_text(
+                "# Managed by personal-workflows\n"
+                'name = "review-audit"\n'
+                'model = "old-model"\n'
+                "[broken\n",
+                encoding="utf-8",
+            ),
+            "malformed-guidance": lambda home: (home / "AGENTS.md").write_text(
+                "<!-- personal-workflows:start -->\n"
+                "- `full`: `one`\n"
+                "- `full`: `two`\n"
+                "- `light`: `light`\n"
+                "<!-- personal-workflows:end -->\n",
+                encoding="utf-8",
+            ),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                codex_home = self.create_managed_codex_home(Path(directory))
+                mutate(codex_home)
+                before = self.tree_contents(codex_home)
+
+                result = subprocess.run(
+                    ["zsh", str(WRAPPER), "--models-only"],
+                    check=False,
+                    capture_output=True,
+                    input="\n\n",
+                    text=True,
+                    env=dict(os.environ, CODEX_HOME=str(codex_home)),
+                )
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertTrue(
+                    "managed" in result.stderr.lower()
+                    or "personal-workflows" in result.stderr.lower(),
+                    result.stderr,
+                )
+                self.assertEqual(self.tree_contents(codex_home), before)
+                self.assertFalse(list(codex_home.rglob("*.backup.*")))
+
+    def test_models_only_rolls_back_every_written_target_after_atomic_replace_failure(self):
+        """A failure after one replacement must not leave model roles split across files."""
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = self.create_managed_codex_home(Path(directory))
+            before = self.tree_contents(codex_home)
+            real_replace = os.replace
+            calls = {"count": 0}
+
+            def fail_third_replace(source, destination):
+                calls["count"] += 1
+                if calls["count"] == 3:
+                    raise OSError("injected atomic replacement failure")
+                return real_replace(source, destination)
+
+            with patch.object(provider_config.os, "replace", side_effect=fail_third_replace):
+                with self.assertRaises(OSError):
+                    provider_config.apply_model_routing_update(
+                        codex_home,
+                        "gpt-5.6-sol",
+                        "gpt-5.6-luna",
+                    )
+
+            after = self.tree_contents(codex_home)
+            for relative, contents in before.items():
+                self.assertEqual(after[relative], contents, relative)
+            self.assertEqual(len(list(codex_home.rglob("*.backup.*"))), 7)
+
+    def test_models_only_skips_a_broken_symlink_backup_collision(self):
+        """Following or reusing a broken backup symlink can escape or block the target directory."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            codex_home = self.create_managed_codex_home(temporary)
+            broken_backup = codex_home / "config.toml.backup.1"
+            outside_target = temporary / "missing-backup-target"
+            broken_backup.symlink_to(outside_target)
+
+            backups = provider_config.apply_model_routing_update(
+                codex_home,
+                "gpt-5.6-sol",
+                "gpt-5.6-luna",
+            )
+
+            self.assertTrue(broken_backup.is_symlink())
+            self.assertFalse(outside_target.exists())
+            self.assertEqual(backups[codex_home / "config.toml"].name, "config.toml.backup.2")
+            self.assertTrue((codex_home / "config.toml.backup.2").is_file())
+
+    def test_models_only_refuses_an_agent_directory_symlink_outside_codex_home(self):
+        """An owned-looking file under an escaped parent must not authorize outside writes."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            codex_home = self.create_managed_codex_home(temporary)
+            agents = codex_home / "agents"
+            outside_agents = temporary / "outside-agents"
+            agents.rename(outside_agents)
+            agents.symlink_to(outside_agents, target_is_directory=True)
+            outside_before = self.tree_contents(outside_agents)
+
+            with self.assertRaises(ValidationError):
+                provider_config.plan_model_routing_update(
+                    codex_home,
+                    "gpt-5.6-sol",
+                    "gpt-5.6-luna",
+                )
+
+            self.assertEqual(self.tree_contents(outside_agents), outside_before)
+            self.assertFalse(list(outside_agents.rglob("*.backup.*")))
 
 
 if __name__ == "__main__":

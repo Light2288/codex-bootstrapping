@@ -48,6 +48,19 @@ guidance is loaded. The optional provider wizard is separate; see
 [provider configuration](docs/provider-configuration.md) only if you need a
 compatible custom provider.
 
+After initial setup, the same wizard can rotate only the selected provider's
+Keychain credential or update only the managed full/light model assignments:
+
+```sh
+zsh scripts/configure-provider.zsh --credential-only
+zsh scripts/configure-provider.zsh --models-only
+```
+
+These modes are mutually exclusive. Credential-only mode does not change
+configuration files. Models-only mode changes the top-level default model and
+only ownership-marked `personal-workflows` guidance and agent profiles; it
+backs up every changed file and never edits plugin caches.
+
 ## Update, verify, and uninstall
 
 Re-run the bootstrap after pulling updates. It is idempotent: it does not add

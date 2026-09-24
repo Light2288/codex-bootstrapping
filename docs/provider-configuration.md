@@ -9,6 +9,10 @@ Responses API endpoint and credential.
 zsh scripts/configure-provider.zsh
 ```
 
+With no focused-mode option, this remains the complete flow: provider ID,
+endpoint, transport, authentication mode, credential, and default model are
+reviewed together.
+
 The wizard asks for every provider setting and accepts these reviewed IBM ICA
 values when Enter is pressed:
 
@@ -49,6 +53,42 @@ normally inherit variables exported by shell profiles.
 
 The two modes are exclusive: a provider uses either the Keychain-backed `auth`
 table or an `env_key`, never both.
+
+## Focused reconfiguration
+
+Rotate only the Keychain credential for a provider with:
+
+```zsh
+zsh scripts/configure-provider.zsh --credential-only
+```
+
+This prompts for the provider ID, confirmation, and a hidden credential. It
+uses the same standard-input-to-Keychain helper as the complete flow and does
+not invoke the configuration transformer or change any file.
+
+Update only managed model routing with:
+
+```zsh
+zsh scripts/configure-provider.zsh --models-only
+```
+
+The full and light prompts default to `gpt-5.6-sol` and `gpt-5.6-luna`.
+After preview and confirmation, the transaction updates the top-level `model`
+in `config.toml`, the `full` and `light` values inside the marked
+`personal-workflows` block in `AGENTS.md`, and these owned agent assignments:
+
+| Model role | Managed agents |
+| --- | --- |
+| Light | `review-spec` |
+| Full | `review-quality`, `review-audit`, `doc-analyst`, `document-worker` |
+
+Every target must already exist and carry its expected ownership marker or
+identity. Missing, malformed, symlinked, or unmanaged targets abort before any
+write. Changed files receive collision-safe sibling backups and are replaced
+atomically; a later replacement failure rolls earlier replacements back.
+Unrelated configuration, guidance, agents, and plugin caches are outside this
+mode's write set. The two focused modes cannot be combined, and provider or
+endpoint changes remain exclusive to the complete flow.
 
 ## Safe inspection
 

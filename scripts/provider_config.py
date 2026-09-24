@@ -56,6 +56,16 @@ _RESERVED_PROVIDER_IDS = {"openai", "ollama", "lmstudio"}
 _ENVIRONMENT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _MANAGED_ROOT_KEYS = ("model", "model_reasoning_effort", "model_provider")
 _REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+_PROFILE_START_MARKER = "<!-- personal-workflows:start -->"
+_PROFILE_END_MARKER = "<!-- personal-workflows:end -->"
+_MANAGED_AGENT_HEADER = "# Managed by personal-workflows\n"
+_MANAGED_AGENT_MODELS = {
+    "doc-analyst.toml": "full",
+    "document-worker.toml": "full",
+    "review-audit.toml": "full",
+    "review-quality.toml": "full",
+    "review-spec.toml": "light",
+}
 
 
 @dataclass(frozen=True)
@@ -78,10 +88,7 @@ def _require_safe_text(name, value):
 
 def validate_settings(settings):
     """Validate settings before they are rendered into TOML."""
-    if not _PROVIDER_ID.match(settings.provider_id):
-        raise ValidationError("provider ID may contain only letters, numbers, underscores, and hyphens")
-    if settings.provider_id in _RESERVED_PROVIDER_IDS:
-        raise ValidationError("provider ID is reserved by Codex")
+    validate_provider_id(settings.provider_id)
     _require_safe_text("display name", settings.display_name)
     _require_safe_text("model", settings.model)
     parsed_url = urlparse(settings.base_url)
@@ -104,6 +111,15 @@ def validate_settings(settings):
     if settings.auth_mode not in ("keychain", "environment"):
         raise ValidationError("authentication mode must be keychain or environment")
     return settings
+
+
+def validate_provider_id(provider_id):
+    """Validate a provider identifier without reading or rendering configuration."""
+    if not _PROVIDER_ID.match(provider_id):
+        raise ValidationError("provider ID may contain only letters, numbers, underscores, and hyphens")
+    if provider_id in _RESERVED_PROVIDER_IDS:
+        raise ValidationError("provider ID is reserved by Codex")
+    return provider_id
 
 
 def toml_quote(value):
@@ -255,6 +271,15 @@ def _decode_toml_basic_key(value):
         output.append(chr(codepoint))
         index += digits + 1
     return "".join(output)
+
+
+def _parse_toml_string_value(value):
+    value = value.strip()
+    if value.startswith('"'):
+        return _decode_toml_basic_key(value)
+    if len(value) >= 2 and value[0] == "'" and value[-1] == "'" and "'" not in value[1:-1]:
+        return value[1:-1]
+    return None
 
 
 def _parse_dotted_keys(value):
@@ -523,6 +548,217 @@ def atomic_write_config(target, content):
     return backup
 
 
+def _validate_model_name(role, value):
+    _require_safe_text("{0} model".format(role), value)
+    if "`" in value:
+        raise ValidationError("{0} model cannot contain a backtick".format(role))
+    return value
+
+
+def _owned_regular_file(path, label, codex_home):
+    if path.is_symlink():
+        raise ValidationError("refusing symlinked {0}: {1}".format(label, path))
+    if not path.is_file():
+        raise ValidationError("missing managed {0}: {1}".format(label, path))
+    try:
+        path.resolve().relative_to(Path(codex_home).resolve())
+    except ValueError:
+        raise ValidationError("refusing {0} outside the Codex home: {1}".format(label, path))
+
+
+def _replace_single_root_assignment(existing, key, value, label):
+    lines = existing.splitlines(keepends=True)
+    lexed_lines = _lex_toml_lines(lines)
+    matches = []
+    root_section = True
+    for index, lexed_line in enumerate(lexed_lines):
+        if not lexed_line.is_structural:
+            continue
+        stripped = lexed_line.text.lstrip()
+        header = _parse_table_header(lexed_line.text)
+        if stripped.startswith("[") and header is None:
+            raise ValidationError("managed {0} contains a malformed table header".format(label))
+        if header is not None:
+            root_section = False
+        if root_section:
+            match = _root_assignment_pattern(key).match(lexed_line.text)
+            if match:
+                matches.append((index, match))
+    if len(matches) != 1:
+        raise ValidationError(
+            "managed {0} must contain exactly one top-level {1} assignment".format(
+                label, key
+            )
+        )
+    index, match = matches[0]
+    if lexed_lines[index].multiline_after is not None:
+        raise ValidationError("managed {0} has a multiline {1}".format(label, key))
+    current_value = _parse_toml_string_value(match.group(2))
+    if current_value is None or not current_value:
+        raise ValidationError("managed {0} has a malformed {1}".format(label, key))
+    lines[index] = match.group(1) + toml_quote(value) + match.group(3) + match.group(4)
+    rendered = "".join(lines)
+    _validate_toml_if_available(rendered)
+    return rendered
+
+
+def _replace_managed_guidance(existing, full_model, light_model):
+    if existing.count(_PROFILE_START_MARKER) != 1 or existing.count(_PROFILE_END_MARKER) != 1:
+        raise ValidationError("managed personal-workflows guidance markers are missing or duplicated")
+    start = existing.index(_PROFILE_START_MARKER)
+    end = existing.index(_PROFILE_END_MARKER)
+    if end < start:
+        raise ValidationError("managed personal-workflows guidance markers are reversed")
+    block_end = end + len(_PROFILE_END_MARKER)
+    block = existing[start:block_end]
+    replacements = {"full": full_model, "light": light_model}
+    for role, model in replacements.items():
+        pattern = re.compile(
+            r"^(\s*-\s*`" + role + r"`:\s*`)([^`]*)(`\s*)$", re.MULTILINE
+        )
+        matches = list(pattern.finditer(block))
+        if len(matches) != 1:
+            raise ValidationError(
+                "managed personal-workflows guidance must contain exactly one {0} model".format(
+                    role
+                )
+            )
+        block = pattern.sub(lambda match: match.group(1) + model + match.group(3), block)
+    return existing[:start] + block + existing[block_end:]
+
+
+def _validate_agent_identity(existing, expected_name, path):
+    if not existing.startswith(_MANAGED_AGENT_HEADER):
+        raise ValidationError("refusing unmanaged agent: {0}".format(path))
+    name_pattern = _root_assignment_pattern("name")
+    names = []
+    root_section = True
+    for lexed_line in _lex_toml_lines(existing.splitlines(keepends=True)):
+        if not lexed_line.is_structural:
+            continue
+        if _parse_table_header(lexed_line.text) is not None:
+            root_section = False
+        if root_section:
+            match = name_pattern.match(lexed_line.text)
+            if match:
+                names.append(_parse_toml_string_value(match.group(2)))
+    if names != [expected_name]:
+        raise ValidationError("managed agent identity is malformed: {0}".format(path))
+    _validate_toml_if_available(existing)
+
+
+def plan_model_routing_update(codex_home, full_model, light_model):
+    """Validate and render the complete ownership-bounded routing update."""
+    codex_home = Path(codex_home)
+    full_model = _validate_model_name("full", full_model)
+    light_model = _validate_model_name("light", light_model)
+    config_path = codex_home / "config.toml"
+    guidance_path = codex_home / "AGENTS.md"
+    _owned_regular_file(config_path, "config", codex_home)
+    _owned_regular_file(guidance_path, "guidance", codex_home)
+
+    originals = {
+        config_path: config_path.read_text(encoding="utf-8"),
+        guidance_path: guidance_path.read_text(encoding="utf-8"),
+    }
+    rendered = {
+        config_path: _replace_single_root_assignment(
+            originals[config_path], "model", full_model, "config"
+        ),
+        guidance_path: _replace_managed_guidance(
+            originals[guidance_path], full_model, light_model
+        ),
+    }
+    for filename, role in sorted(_MANAGED_AGENT_MODELS.items()):
+        path = codex_home / "agents" / filename
+        _owned_regular_file(path, "agent", codex_home)
+        existing = path.read_text(encoding="utf-8")
+        _validate_agent_identity(existing, filename[:-5], path)
+        model = full_model if role == "full" else light_model
+        originals[path] = existing
+        rendered[path] = _replace_single_root_assignment(existing, "model", model, "agent")
+    return {
+        path: contents
+        for path, contents in rendered.items()
+        if contents != originals[path]
+    }
+
+
+def _collision_safe_backup(destination):
+    sequence = 1
+    while True:
+        backup = destination.with_name("{0}.backup.{1}".format(destination.name, sequence))
+        if not backup.exists() and not backup.is_symlink():
+            shutil.copy2(str(destination), str(backup))
+            return backup
+        sequence += 1
+
+
+def _atomic_replace_content(destination, content):
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=".{0}.".format(destination.name), dir=str(destination.parent)
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as temporary:
+            temporary.write(content)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.chmod(temporary_name, destination.stat().st_mode & 0o777)
+        os.replace(temporary_name, str(destination))
+    except Exception:
+        try:
+            os.unlink(temporary_name)
+        except OSError:
+            pass
+        raise
+
+
+def _atomic_restore_bytes(destination, content, mode):
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=".{0}.rollback.".format(destination.name), dir=str(destination.parent)
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as temporary:
+            temporary.write(content)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.chmod(temporary_name, mode)
+        os.replace(temporary_name, str(destination))
+    except Exception:
+        try:
+            os.unlink(temporary_name)
+        except OSError:
+            pass
+        raise
+
+
+def apply_model_routing_update(codex_home, full_model, light_model):
+    """Back up and atomically apply one validated multi-file routing transaction."""
+    updates = plan_model_routing_update(codex_home, full_model, light_model)
+    originals = {
+        path: (path.read_bytes(), path.stat().st_mode & 0o777) for path in updates
+    }
+    backups = {path: _collision_safe_backup(path) for path in updates}
+    replaced = []
+    try:
+        for path, content in updates.items():
+            _atomic_replace_content(path, content)
+            replaced.append(path)
+    except Exception as error:
+        try:
+            for path in reversed(replaced):
+                content, mode = originals[path]
+                _atomic_restore_bytes(path, content, mode)
+        except Exception as rollback_error:
+            raise OSError(
+                "model routing update failed and rollback was incomplete: {0}".format(
+                    rollback_error
+                )
+            ) from error
+        raise
+    return backups
+
+
 def _settings_from_arguments(arguments):
     return ProviderSettings(
         provider_id=arguments.provider_id,
@@ -550,9 +786,48 @@ def main(argv=None):
     parser.add_argument("--credential-env-var", default=DEFAULT_SETTINGS.credential_env_var)
     parser.add_argument("--supports-websockets", choices=("true", "false"), default="false")
     parser.add_argument("--auth-mode", choices=("keychain", "environment"), default="keychain")
+    parser.add_argument("--models-only", action="store_true")
+    parser.add_argument("--full-model", default="gpt-5.6-sol")
+    parser.add_argument("--light-model", default="gpt-5.6-luna")
+    parser.add_argument("--validate-provider-id")
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     arguments = parser.parse_args(argv)
+
+    if arguments.validate_provider_id is not None:
+        if arguments.models_only or arguments.check or arguments.dry_run:
+            parser.error("--validate-provider-id cannot be combined with another mode")
+        validate_provider_id(arguments.validate_provider_id)
+        return 0
+
+    if arguments.models_only:
+        updates = plan_model_routing_update(
+            arguments.config.parent,
+            arguments.full_model,
+            arguments.light_model,
+        )
+        if arguments.check:
+            print("check: managed model routing is valid; no files were changed")
+            return 0
+        if arguments.dry_run:
+            print("dry-run: would update managed model routing under {0}".format(arguments.config.parent))
+            print("full model: {0}".format(arguments.full_model))
+            print("light model: {0}".format(arguments.light_model))
+            for path in updates:
+                print("would update {0}".format(path))
+            return 0
+        backups = apply_model_routing_update(
+            arguments.config.parent,
+            arguments.full_model,
+            arguments.light_model,
+        )
+        if backups:
+            print("updated managed model routing; backups:")
+            for backup in backups.values():
+                print(backup)
+        else:
+            print("managed model routing is already current")
+        return 0
 
     settings = _settings_from_arguments(arguments)
     existing = arguments.config.read_text(encoding="utf-8") if arguments.config.exists() else ""

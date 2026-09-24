@@ -18,3 +18,10 @@ and machine-local provider state. The provider configurator and its public
 documentation are tracked, but generated provider configuration and stored
 credentials are not. Treat any unexpected secret-like value in the repository
 as a security issue.
+
+Credential-only reconfiguration keeps input hidden, passes it to the bundled
+Keychain helper over standard input, and does not read or write configuration.
+Models-only reconfiguration never accesses Keychain or plugin caches. It
+requires exact `personal-workflows` ownership markers, refuses symlinked or
+malformed targets, and uses backups, atomic replacement, and rollback to avoid
+mixed model assignments.

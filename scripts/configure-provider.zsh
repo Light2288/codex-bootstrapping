@@ -11,9 +11,10 @@ keychain_helper_override="${CODEX_PROVIDER_KEYCHAIN_HELPER:-}"
 config_path="${CODEX_HOME:-$HOME/.codex}/config.toml"
 mode="apply"
 smoke_test=false
+focused_mode="complete"
 
 usage() {
-  print "Usage: ${0:t} [--config PATH] [--check | --dry-run] [--smoke-test]"
+  print "Usage: ${0:t} [--config PATH] [--check | --dry-run] [--credential-only | --models-only] [--smoke-test]"
 }
 
 while (( $# > 0 )); do
@@ -37,6 +38,16 @@ while (( $# > 0 )); do
       smoke_test=true
       shift
       ;;
+    --credential-only)
+      [[ "$focused_mode" == "complete" ]] || { print -u2 -- "--credential-only and --models-only cannot be combined"; exit 2; }
+      focused_mode="credential"
+      shift
+      ;;
+    --models-only)
+      [[ "$focused_mode" == "complete" ]] || { print -u2 -- "--credential-only and --models-only cannot be combined"; exit 2; }
+      focused_mode="models"
+      shift
+      ;;
     --help|-h)
       usage
       exit 0
@@ -50,6 +61,10 @@ while (( $# > 0 )); do
 done
 
 [[ -f "$transformer" ]] || { print -u2 "missing provider transformer: $transformer"; exit 1; }
+if [[ "$focused_mode" != "complete" && "$mode" != "apply" ]]; then
+  print -u2 "focused modes cannot be combined with --check or --dry-run"
+  exit 2
+fi
 
 provider_id="ibm_ica"
 display_name="IBM ICA"
@@ -60,6 +75,24 @@ wire_api="responses"
 credential_env_var="IBM_ICA_CODEX_API_KEY"
 supports_websockets="false"
 auth_mode="keychain"
+light_model="gpt-5.6-luna"
+
+prompt_default() {
+  local label="$1"
+  local default_value="$2"
+  local response=""
+  printf '%s [%s]: ' "$label" "$default_value"
+  IFS= read -r response
+  REPLY="${response:-$default_value}"
+}
+
+run_keychain_helper() {
+  if [[ -n "$keychain_helper_override" ]]; then
+    "$keychain_helper_override" "$@"
+  else
+    python3 "$keychain_helper" "$@"
+  fi
+}
 
 transformer_args=(
   --config "$config_path"
@@ -79,22 +112,62 @@ if [[ "$mode" == "check" || "$mode" == "dry-run" ]]; then
   exec python3 "$transformer" "${transformer_args[@]}" "--$mode"
 fi
 
-prompt_default() {
-  local label="$1"
-  local default_value="$2"
-  local response=""
-  printf '%s [%s]: ' "$label" "$default_value"
-  IFS= read -r response
-  REPLY="${response:-$default_value}"
-}
-
-run_keychain_helper() {
-  if [[ -n "$keychain_helper_override" ]]; then
-    "$keychain_helper_override" "$@"
-  else
-    python3 "$keychain_helper" "$@"
+if [[ "$focused_mode" == "credential" ]]; then
+  prompt_default "Provider ID" "$provider_id"; provider_id="$REPLY"
+  python3 "$transformer" --validate-provider-id "$provider_id"
+  print "The credential will be stored only in macOS Keychain; no configuration file will change."
+  printf 'Replace this provider credential? [y/N]: '
+  IFS= read -r confirmation
+  [[ "$confirmation" == "y" || "$confirmation" == "Y" ]] || { print "No changes made."; exit 0; }
+  service="codex-provider-$provider_id"
+  if ! run_keychain_helper check --service "$service" --account "codex"; then
+    print -u2 "Keychain helper is unavailable; no files were changed"
+    exit 1
   fi
-}
+  print -n "API key (stored only in macOS Keychain; input hidden): "
+  IFS= read -r -s api_key
+  print ""
+  [[ -n "$api_key" ]] || { print -u2 "API key cannot be empty"; exit 1; }
+  prior_credential=""
+  if prior_credential=$(run_keychain_helper get --service "$service" --account "codex"); then
+    :
+  else
+    lookup_status=$?
+    if (( lookup_status != 44 )); then
+      unset api_key
+      print -u2 "Could not inspect the existing macOS Keychain credential"
+      exit 1
+    fi
+  fi
+  if ! print -rn -- "$api_key" | run_keychain_helper set --service "$service" --account "codex"; then
+    unset api_key prior_credential
+    print -u2 "Could not store the API key in macOS Keychain"
+    exit 1
+  fi
+  unset api_key prior_credential
+  print "Credential updated; no configuration files were changed."
+  exit 0
+fi
+
+if [[ "$focused_mode" == "models" ]]; then
+  prompt_default "Full model" "$model"; model="$REPLY"
+  prompt_default "Light model" "$light_model"; light_model="$REPLY"
+  model_args=(
+    --config "$config_path"
+    --models-only
+    --full-model "$model"
+    --light-model "$light_model"
+  )
+  print ""
+  python3 "$transformer" "${model_args[@]}" --dry-run
+  print ""
+  print "Only the top-level default model and ownership-marked personal-workflows routing files will change."
+  printf 'Apply these model assignments? [y/N]: '
+  IFS= read -r confirmation
+  [[ "$confirmation" == "y" || "$confirmation" == "Y" ]] || { print "No changes made."; exit 0; }
+  python3 "$transformer" "${model_args[@]}"
+  exit 0
+fi
 
 prompt_default "Provider ID" "$provider_id"; provider_id="$REPLY"
 prompt_default "Display name" "$display_name"; display_name="$REPLY"

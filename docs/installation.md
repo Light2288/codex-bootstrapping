@@ -38,6 +38,16 @@ managed guidance block, and managed agents are idempotent. Existing managed
 files may receive collision-safe backups from the profile installer; unrelated
 agent files are never replaced.
 
+To rotate a configured provider credential without changing `config.toml`, use
+`zsh scripts/configure-provider.zsh --credential-only`. To update the managed
+full/light routing after the profile is installed, use
+`zsh scripts/configure-provider.zsh --models-only`. The latter validates all
+owned targets before writing, creates sibling backups, applies atomic
+replacements, and rolls already-written files back if the transaction fails.
+It refuses missing, malformed, symlinked, or unmanaged targets instead of
+partially repairing them. See [provider configuration](provider-configuration.md)
+for the prompts and exact assignment rules.
+
 ## Verification
 
 Run `zsh scripts/verify.zsh` from the repository root. Verification requires

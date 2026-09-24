@@ -29,5 +29,7 @@ post-replacement identities, a persistent lock inode, and atomically replaced
 checksummed transaction metadata. A later run rejects corrupt metadata or
 recovers a stale interrupted transaction before applying new assignments;
 coexisting legacy/new journals must agree, and final cleanup exchanges and
-verifies the expected journal before deleting it. Unexpected external target
-or journal content is preserved rather than overwritten.
+verifies complete journal records before atomically moving the live record off
+its pathname. Every cleanup crash point therefore leaves either a valid
+journal or no live journal. Unexpected external target or journal content is
+preserved rather than overwritten.

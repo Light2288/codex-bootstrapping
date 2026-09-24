@@ -1250,6 +1250,12 @@ def _journal_envelope(metadata):
     }
 
 
+def _render_journal(metadata):
+    return (json.dumps(_journal_envelope(metadata), sort_keys=True) + "\n").encode(
+        "utf-8"
+    )
+
+
 def _decode_journal(raw):
     if not raw:
         raise ValidationError("models-only transaction journal is empty")
@@ -1297,8 +1303,7 @@ def _read_journal_at(directory_descriptor):
 
 
 def _write_journal_at(directory_descriptor, metadata):
-    envelope = _journal_envelope(metadata)
-    rendered = (json.dumps(envelope, sort_keys=True) + "\n").encode("utf-8")
+    rendered = _render_journal(metadata)
     temporary_name, descriptor = _create_temporary_file_at(
         directory_descriptor,
         _MODEL_ROUTING_JOURNAL_TEMP_PREFIX,
@@ -1379,14 +1384,13 @@ def _remove_journal_at(directory_descriptor, expected_metadata):
         except FileNotFoundError:
             return
         raise ValidationError("unexpected models-only transaction journal")
-    sentinel_content = ("journal-cleanup-{0}\n".format(uuid.uuid4().hex)).encode(
-        "utf-8"
-    )
+    sentinel_content = _render_journal(json.loads(expected_metadata.decode("utf-8")))
     temporary_name, descriptor = _create_temporary_file_at(
         directory_descriptor,
         "provider-model-routing.journal.cleanup",
     )
     exchanged = False
+    moved_off_live = False
     try:
         _write_all(descriptor, sentinel_content)
         os.fsync(descriptor)
@@ -1410,11 +1414,10 @@ def _remove_journal_at(directory_descriptor, expected_metadata):
             sentinel_identity,
             sentinel_content,
         )
-        displaced_identity, displaced_content = _identity_and_content_for_name_at(
+        _displaced_identity, displaced_content = _identity_and_content_for_name_at(
             directory_descriptor,
             temporary_name,
         )
-        del displaced_identity
         observed_metadata = _decode_journal(displaced_content)
         observed_canonical = _canonical_transaction_metadata(observed_metadata)
         if not sentinel_is_current or observed_canonical != expected_metadata:
@@ -1422,12 +1425,77 @@ def _remove_journal_at(directory_descriptor, expected_metadata):
                 "models-only transaction journal changed before cleanup"
             )
         os.unlink(temporary_name, dir_fd=directory_descriptor)
-        os.unlink(_MODEL_ROUTING_JOURNAL_NAME, dir_fd=directory_descriptor)
+        exchanged = False
         _fsync_directory(directory_descriptor)
+        os.rename(
+            _MODEL_ROUTING_JOURNAL_NAME,
+            temporary_name,
+            src_dir_fd=directory_descriptor,
+            dst_dir_fd=directory_descriptor,
+        )
+        moved_off_live = True
+        _fsync_directory(directory_descriptor)
+        moved_identity, moved_content = _identity_and_content_for_name_at(
+            directory_descriptor,
+            temporary_name,
+        )
+        if not _exchange_snapshot_matches(
+            moved_identity,
+            moved_content,
+            sentinel_identity,
+            sentinel_content,
+        ):
+            raise ValidationError(
+                "models-only transaction journal changed during cleanup"
+            )
+        try:
+            os.stat(
+                _MODEL_ROUTING_JOURNAL_NAME,
+                dir_fd=directory_descriptor,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            pass
+        else:
+            raise ValidationError(
+                "models-only transaction journal reappeared during cleanup"
+            )
+        os.unlink(temporary_name, dir_fd=directory_descriptor)
+        _fsync_directory(directory_descriptor)
+        try:
+            os.stat(
+                _MODEL_ROUTING_JOURNAL_NAME,
+                dir_fd=directory_descriptor,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            pass
+        else:
+            raise ValidationError(
+                "models-only transaction journal reappeared after cleanup"
+            )
     except Exception:
         if descriptor is not None:
             os.close(descriptor)
-        if exchanged:
+        if moved_off_live:
+            try:
+                os.stat(
+                    _MODEL_ROUTING_JOURNAL_NAME,
+                    dir_fd=directory_descriptor,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                try:
+                    os.rename(
+                        temporary_name,
+                        _MODEL_ROUTING_JOURNAL_NAME,
+                        src_dir_fd=directory_descriptor,
+                        dst_dir_fd=directory_descriptor,
+                    )
+                    _fsync_directory(directory_descriptor)
+                except FileNotFoundError:
+                    pass
+        elif exchanged:
             _restore_cleanup_exchange_at(
                 directory_descriptor,
                 temporary_name,

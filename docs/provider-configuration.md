@@ -105,9 +105,11 @@ lock journals are migrated before recovery. An unexpected external target
 swap or edit, or an invalid journal checksum, stops recovery safely instead of
 overwriting data. If legacy and atomic journals coexist, they must describe the
 same transaction before legacy bytes are cleared. Final cleanup atomically
-exchanges and verifies the expected journal, preserving swapped or corrupted
-evidence instead of unlinking it; do not delete the journal to bypass that
-refusal. Unrelated
+exchanges two complete journal records, verifies both, and atomically moves the
+remaining live record before deleting private artifacts. Every cleanup crash
+point therefore leaves either a valid journal or no live journal; late swaps
+and corrupted evidence are preserved instead of unlinked. Do not delete the
+journal to bypass that refusal. Unrelated
 configuration, guidance, agents, and plugin caches are outside this mode's
 write set. Supported full/light overrides remain valid through profile checks
 and bootstrap reinstalls. The two focused modes cannot be combined, and

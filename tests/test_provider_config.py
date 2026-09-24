@@ -1306,6 +1306,91 @@ class ProviderConfigTest(unittest.TestCase):
             self.assertTrue(swapped["done"])
             self.assertEqual(journal.read_bytes(), external)
 
+    def test_models_only_preserves_a_journal_swapped_after_cleanup_verification(self):
+        """The final atomic move must preserve a swap after cleanup verification."""
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = self.create_managed_codex_home(Path(directory))
+            journal = codex_home / ".provider-model-routing.journal"
+            external = b"external-journal-before-final-move\n"
+            real_rename = provider_config.os.rename
+            swapped = {"done": False}
+
+            def swap_then_rename(source, destination, *arguments, **keywords):
+                if source == ".provider-model-routing.journal":
+                    journal.write_bytes(external)
+                    swapped["done"] = True
+                return real_rename(source, destination, *arguments, **keywords)
+
+            with patch.object(
+                provider_config.os,
+                "rename",
+                side_effect=swap_then_rename,
+            ):
+                with self.assertRaises(ValidationError):
+                    provider_config.apply_model_routing_update(
+                        codex_home,
+                        "recovered-full",
+                        "recovered-light",
+                    )
+
+            self.assertTrue(swapped["done"])
+            self.assertEqual(journal.read_bytes(), external)
+
+    def test_models_only_recovers_when_killed_after_cleanup_exchange(self):
+        """Cleanup must leave a valid live journal if killed after its exchange."""
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = self.create_managed_codex_home(Path(directory))
+            child_code = """
+import os
+import signal
+from pathlib import Path
+import scripts.provider_config as provider_config
+
+home = Path(os.environ["TEST_CODEX_HOME"])
+real_exchange = provider_config._exchange_paths_at
+
+def exchange_then_terminate(directory_descriptor, first, second):
+    result = real_exchange(directory_descriptor, first, second)
+    if (
+        first == ".provider-model-routing.journal"
+        or second == ".provider-model-routing.journal"
+    ):
+        os.kill(os.getpid(), signal.SIGKILL)
+    return result
+
+provider_config._exchange_paths_at = exchange_then_terminate
+provider_config.apply_model_routing_update(home, "recovered-full", "recovered-light")
+"""
+            child = subprocess.run(
+                [sys.executable, "-c", child_code],
+                check=False,
+                capture_output=True,
+                text=True,
+                cwd=ROOT,
+                env=dict(os.environ, TEST_CODEX_HOME=str(codex_home)),
+            )
+
+            self.assertEqual(child.returncode, -signal.SIGKILL)
+            journal = codex_home / ".provider-model-routing.journal"
+            envelope = json.loads(journal.read_text(encoding="utf-8"))
+            canonical = json.dumps(
+                envelope["payload"],
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            self.assertEqual(
+                envelope["sha256"],
+                hashlib.sha256(canonical).hexdigest(),
+            )
+
+            provider_config.apply_model_routing_update(
+                codex_home,
+                "recovered-full",
+                "recovered-light",
+            )
+
+            self.assertFalse(journal.exists())
+
     def test_models_only_recovers_when_killed_during_journal_rewrite(self):
         """Killing a journal rewrite must leave the prior complete recovery record."""
         with tempfile.TemporaryDirectory() as directory:

@@ -53,9 +53,10 @@ user request first, then from the plan's `Execution tier`; a request for
 `lite` is not an eligibility override. Use `lite` only when every task is S or
 M, `risk: none`, mechanical, grounded in an existing pattern, and objectively
 verifiable. Missing or invalid metadata, an L task, any non-`none` risk,
-ambiguous or borderline work, and security, auth, data, migration,
-concurrency, or performance concerns select or escalate to `full`. Record the
-selected tier and every conservative escalation.
+or any full-only concern selects or escalates to `full`. The full-only
+concerns are `ambiguous`, `borderline`, `security`, `auth`, `data`,
+`migrations`, `concurrency`, and `performance`. Record the selected tier and
+every conservative escalation.
 
 Resolve the exact model from the active personal-workflows managed model
 routing block. Its default role mapping is `light` = `gpt-5.6-luna` and

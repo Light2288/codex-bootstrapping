@@ -49,13 +49,23 @@
       "allowed_sizes": ["S", "M"],
       "required_risk": "none"
     },
+    "full_only_concerns": [
+      "ambiguous",
+      "borderline",
+      "security",
+      "auth",
+      "data",
+      "migrations",
+      "concurrency",
+      "performance"
+    ],
     "escalation_tier": "full",
     "execution_methods": {
       "subagent-driven-development": {
-        "can_override_parent_model": true
+        "can_set_subagent_model": true
       },
       "executing-plans": {
-        "can_override_parent_model": false,
+        "can_set_subagent_model": false,
         "limitation": "cannot-switch-parent-model"
       }
     },

@@ -25,15 +25,22 @@ def task_is_lite_eligible(task, eligibility):
 
 def resolve_case(contract, case):
     selected_tier = case["requested_tier"]
-    if selected_tier == "lite" and not all(
-        task_is_lite_eligible(task, contract["lite_eligibility"])
+    has_full_only_concern = any(
+        set(task.get("concerns", [])) & set(contract["full_only_concerns"])
         for task in case["tasks"]
+    )
+    if selected_tier == "lite" and (
+        has_full_only_concern
+        or not all(
+            task_is_lite_eligible(task, contract["lite_eligibility"])
+            for task in case["tasks"]
+        )
     ):
         selected_tier = contract["escalation_tier"]
 
     execution = contract["execution_methods"][case["execution_method"]]
     implementation_model = None
-    if execution["can_override_parent_model"]:
+    if execution["can_set_subagent_model"]:
         model_role = contract["tiers"][selected_tier]["implementation_model_role"]
         implementation_model = contract["managed_models"][model_role]
 
@@ -65,6 +72,22 @@ class ModelRoutingContractTest(unittest.TestCase):
                 self.assertEqual(
                     actual["limitation"], case.get("expected_limitation")
                 )
+
+    def test_execution_capabilities_are_explicitly_child_scoped(self):
+        methods = self.load_mapping()["model_routing"]["execution_methods"]
+
+        self.assertEqual(
+            methods["subagent-driven-development"],
+            {"can_set_subagent_model": True},
+        )
+        self.assertEqual(
+            methods["executing-plans"],
+            {
+                "can_set_subagent_model": False,
+                "limitation": "cannot-switch-parent-model",
+            },
+        )
+        self.assertNotIn("can_override_parent_model", str(methods))
 
     def test_implement_lite_is_a_thin_single_delegate_entry_point(self):
         mapping = self.load_mapping()
@@ -105,6 +128,50 @@ class ModelRoutingContractTest(unittest.TestCase):
         self.assertEqual(
             plan_contract["tier_to_model_role"],
             {"lite": "light", "full": "full"},
+        )
+
+    def test_skill_documents_apply_the_machine_readable_routing_contract(self):
+        mapping = self.load_mapping()
+        plan_contract = mapping["planning"]["spec-plan"]
+        routing = mapping["model_routing"]
+        plan_skill = " ".join(
+            (PLUGIN / "skills" / "spec-plan" / "SKILL.md")
+            .read_text(encoding="utf-8")
+            .lower()
+            .split()
+        )
+        implement_skill = " ".join(
+            (PLUGIN / "skills" / "spec-implement" / "SKILL.md")
+            .read_text(encoding="utf-8")
+            .lower()
+            .split()
+        )
+
+        for tier, role in plan_contract["tier_to_model_role"].items():
+            with self.subTest(tier=tier):
+                self.assertIn(f"`**execution tier:** {tier}`", plan_skill)
+                self.assertIn(
+                    f"`**implementation model role:** {role}`", plan_skill
+                )
+        for role, model in routing["managed_models"].items():
+            with self.subTest(role=role):
+                self.assertIn(f"`{role}` = `{model}`", implement_skill)
+        for concern in routing["full_only_concerns"]:
+            with self.subTest(concern=concern):
+                self.assertIn(f"`{concern}`", implement_skill)
+        self.assertIn(
+            "every eligible `lite` implementer dispatch must explicitly set "
+            "the resolved `light` model",
+            implement_skill,
+        )
+        self.assertIn(
+            "every `full` dispatch and every escalated or replacement "
+            "implementer dispatch must explicitly set the resolved `full` model",
+            implement_skill,
+        )
+        self.assertIn(
+            "inline execution cannot switch the current parent model",
+            implement_skill,
         )
 
     def test_managed_guidance_publishes_the_contract_model_names(self):

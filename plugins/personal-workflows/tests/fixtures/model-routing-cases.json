@@ -79,6 +79,125 @@
     "expected_implementation_model": "gpt-5.6-sol"
   },
   {
+    "name": "lite escalates for ambiguous work",
+    "requested_tier": "lite",
+    "execution_method": "subagent-driven-development",
+    "tasks": [
+      {
+        "size": "S",
+        "risk": "none",
+        "mechanical": true,
+        "clear_pattern": true,
+        "objectively_verifiable": true,
+        "concerns": ["ambiguous"]
+      }
+    ],
+    "expected_tier": "full",
+    "expected_implementation_model": "gpt-5.6-sol"
+  },
+  {
+    "name": "lite escalates for borderline work",
+    "requested_tier": "lite",
+    "execution_method": "subagent-driven-development",
+    "tasks": [
+      {
+        "size": "S",
+        "risk": "none",
+        "mechanical": true,
+        "clear_pattern": true,
+        "objectively_verifiable": true,
+        "concerns": ["borderline"]
+      }
+    ],
+    "expected_tier": "full",
+    "expected_implementation_model": "gpt-5.6-sol"
+  },
+  {
+    "name": "lite escalates for auth work",
+    "requested_tier": "lite",
+    "execution_method": "subagent-driven-development",
+    "tasks": [
+      {
+        "size": "S",
+        "risk": "none",
+        "mechanical": true,
+        "clear_pattern": true,
+        "objectively_verifiable": true,
+        "concerns": ["auth"]
+      }
+    ],
+    "expected_tier": "full",
+    "expected_implementation_model": "gpt-5.6-sol"
+  },
+  {
+    "name": "lite escalates for data work",
+    "requested_tier": "lite",
+    "execution_method": "subagent-driven-development",
+    "tasks": [
+      {
+        "size": "S",
+        "risk": "none",
+        "mechanical": true,
+        "clear_pattern": true,
+        "objectively_verifiable": true,
+        "concerns": ["data"]
+      }
+    ],
+    "expected_tier": "full",
+    "expected_implementation_model": "gpt-5.6-sol"
+  },
+  {
+    "name": "lite escalates for migrations",
+    "requested_tier": "lite",
+    "execution_method": "subagent-driven-development",
+    "tasks": [
+      {
+        "size": "S",
+        "risk": "none",
+        "mechanical": true,
+        "clear_pattern": true,
+        "objectively_verifiable": true,
+        "concerns": ["migrations"]
+      }
+    ],
+    "expected_tier": "full",
+    "expected_implementation_model": "gpt-5.6-sol"
+  },
+  {
+    "name": "lite escalates for concurrency work",
+    "requested_tier": "lite",
+    "execution_method": "subagent-driven-development",
+    "tasks": [
+      {
+        "size": "S",
+        "risk": "none",
+        "mechanical": true,
+        "clear_pattern": true,
+        "objectively_verifiable": true,
+        "concerns": ["concurrency"]
+      }
+    ],
+    "expected_tier": "full",
+    "expected_implementation_model": "gpt-5.6-sol"
+  },
+  {
+    "name": "lite escalates for performance work",
+    "requested_tier": "lite",
+    "execution_method": "subagent-driven-development",
+    "tasks": [
+      {
+        "size": "S",
+        "risk": "none",
+        "mechanical": true,
+        "clear_pattern": true,
+        "objectively_verifiable": true,
+        "concerns": ["performance"]
+      }
+    ],
+    "expected_tier": "full",
+    "expected_implementation_model": "gpt-5.6-sol"
+  },
+  {
     "name": "inline lite cannot switch the parent model",
     "requested_tier": "lite",
     "execution_method": "executing-plans",

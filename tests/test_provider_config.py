@@ -1198,6 +1198,114 @@ class ProviderConfigTest(unittest.TestCase):
 
             self.assertEqual(self.tree_contents(codex_home), before)
 
+    def test_models_only_preserves_conflicting_legacy_and_atomic_journals(self):
+        """Migration must not truncate malformed or conflicting legacy recovery state."""
+        cases = {
+            "malformed": b"{not-json\n",
+            "mismatched": None,
+        }
+        for name, legacy_bytes in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                codex_home = self.create_managed_codex_home(Path(directory))
+                lock = codex_home / ".provider-model-routing.lock"
+                payload = {
+                    "version": 1,
+                    "transaction_id": "atomic-record",
+                    "owner": {"pid": 999999},
+                    "phase": "backups",
+                    "targets": [],
+                }
+                canonical = json.dumps(
+                    payload,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+                envelope = {
+                    "journal_version": 1,
+                    "payload": payload,
+                    "sha256": hashlib.sha256(canonical).hexdigest(),
+                }
+                journal = codex_home / ".provider-model-routing.journal"
+                journal.write_text(json.dumps(envelope) + "\n", encoding="utf-8")
+                if legacy_bytes is None:
+                    conflicting = dict(payload, transaction_id="legacy-record")
+                    legacy_bytes = (json.dumps(conflicting) + "\n").encode("utf-8")
+                lock.write_bytes(legacy_bytes)
+                target = codex_home / "config.toml"
+                target_before = target.read_bytes()
+                journal_before = journal.read_bytes()
+
+                with self.assertRaises(ValidationError):
+                    provider_config.apply_model_routing_update(
+                        codex_home,
+                        "recovered-full",
+                        "recovered-light",
+                    )
+
+                self.assertEqual(lock.read_bytes(), legacy_bytes)
+                self.assertEqual(journal.read_bytes(), journal_before)
+                self.assertEqual(target.read_bytes(), target_before)
+
+    def test_models_only_preserves_a_corrupted_journal_at_final_cleanup(self):
+        """Cleanup must not delete journal evidence changed after the last publish."""
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = self.create_managed_codex_home(Path(directory))
+            journal = codex_home / ".provider-model-routing.journal"
+            external = b"externally-corrupted-journal\n"
+            real_remove = provider_config._remove_journal_at
+
+            def corrupt_then_remove(directory_descriptor, *arguments):
+                journal.write_bytes(external)
+                return real_remove(directory_descriptor, *arguments)
+
+            with patch.object(
+                provider_config,
+                "_remove_journal_at",
+                side_effect=corrupt_then_remove,
+            ):
+                with self.assertRaises(ValidationError):
+                    provider_config.apply_model_routing_update(
+                        codex_home,
+                        "recovered-full",
+                        "recovered-light",
+                    )
+
+            self.assertEqual(journal.read_bytes(), external)
+
+    def test_models_only_preserves_a_journal_swapped_during_cleanup(self):
+        """Cleanup exchange must not unlink a journal swapped after verification."""
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = self.create_managed_codex_home(Path(directory))
+            journal = codex_home / ".provider-model-routing.journal"
+            external = b"external-journal-after-cleanup-exchange\n"
+            real_exchange = provider_config._exchange_paths_at
+            swapped = {"done": False}
+
+            def exchange_then_swap(directory_descriptor, first, second):
+                result = real_exchange(directory_descriptor, first, second)
+                if (
+                    first == ".provider-model-routing.journal"
+                    or second == ".provider-model-routing.journal"
+                ):
+                    journal.write_bytes(external)
+                    swapped["done"] = True
+                return result
+
+            with patch.object(
+                provider_config,
+                "_exchange_paths_at",
+                side_effect=exchange_then_swap,
+            ):
+                with self.assertRaises(ValidationError):
+                    provider_config.apply_model_routing_update(
+                        codex_home,
+                        "recovered-full",
+                        "recovered-light",
+                    )
+
+            self.assertTrue(swapped["done"])
+            self.assertEqual(journal.read_bytes(), external)
+
     def test_models_only_recovers_when_killed_during_journal_rewrite(self):
         """Killing a journal rewrite must leave the prior complete recovery record."""
         with tempfile.TemporaryDirectory() as directory:
@@ -1220,6 +1328,7 @@ def replace_then_arm(directory_descriptor, state, content):
 
 def terminate_during_next_write(descriptor, content):
     if armed["value"]:
+        real_write_all(descriptor, content[:max(1, len(content) // 2)])
         os.kill(os.getpid(), signal.SIGKILL)
     return real_write_all(descriptor, content)
 
@@ -1261,6 +1370,72 @@ provider_config.apply_model_routing_update(home, "recovered-full", "recovered-li
             self.assertIn(
                 'model = "recovered-full"',
                 (codex_home / "config.toml").read_text(encoding="utf-8"),
+            )
+
+    def test_models_only_recovers_when_killed_after_journal_replace(self):
+        """Killing before the journal directory sync must leave a complete new record."""
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = self.create_managed_codex_home(Path(directory))
+            child_code = """
+import os
+import signal
+from pathlib import Path
+import scripts.provider_config as provider_config
+
+home = Path(os.environ["TEST_CODEX_HOME"])
+real_replace = provider_config._atomic_replace_content_at
+real_fsync_directory = provider_config._fsync_directory
+armed = {"value": False}
+
+def replace_then_arm(directory_descriptor, state, content):
+    result = real_replace(directory_descriptor, state, content)
+    armed["value"] = True
+    return result
+
+def terminate_before_next_directory_sync(directory_descriptor):
+    if armed["value"]:
+        os.kill(os.getpid(), signal.SIGKILL)
+    return real_fsync_directory(directory_descriptor)
+
+provider_config._atomic_replace_content_at = replace_then_arm
+provider_config._fsync_directory = terminate_before_next_directory_sync
+provider_config.apply_model_routing_update(home, "recovered-full", "recovered-light")
+"""
+            child = subprocess.run(
+                [sys.executable, "-c", child_code],
+                check=False,
+                capture_output=True,
+                text=True,
+                cwd=ROOT,
+                env=dict(os.environ, TEST_CODEX_HOME=str(codex_home)),
+            )
+
+            self.assertEqual(child.returncode, -signal.SIGKILL)
+            journal_path = codex_home / ".provider-model-routing.journal"
+            envelope = json.loads(journal_path.read_text(encoding="utf-8"))
+            self.assertEqual(envelope["payload"]["phase"], "applying")
+            canonical = json.dumps(
+                envelope["payload"],
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            self.assertEqual(
+                envelope["sha256"],
+                hashlib.sha256(canonical).hexdigest(),
+            )
+
+            provider_config.apply_model_routing_update(
+                codex_home,
+                "recovered-full",
+                "recovered-light",
+            )
+
+            self.assertFalse(journal_path.exists())
+            self.assertIn(
+                'model = "recovered-light"',
+                (codex_home / "agents" / "review-spec.toml").read_text(
+                    encoding="utf-8"
+                ),
             )
 
     def test_models_only_recovers_a_hard_terminated_partial_transaction(self):

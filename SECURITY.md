@@ -28,4 +28,6 @@ malformed targets, and uses backups, atomic pathname exchange, verified
 post-replacement identities, a persistent lock inode, and atomically replaced
 checksummed transaction metadata. A later run rejects corrupt metadata or
 recovers a stale interrupted transaction before applying new assignments;
-unexpected external target content is preserved rather than overwritten.
+coexisting legacy/new journals must agree, and final cleanup exchanges and
+verifies the expected journal before deleting it. Unexpected external target
+or journal content is preserved rather than overwritten.

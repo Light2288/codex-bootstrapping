@@ -103,7 +103,11 @@ the released lock, verifies the journal and backups, restores the
 pre-transaction bytes, and only then starts a fresh update. Nonempty legacy
 lock journals are migrated before recovery. An unexpected external target
 swap or edit, or an invalid journal checksum, stops recovery safely instead of
-overwriting data; do not delete the journal to bypass that refusal. Unrelated
+overwriting data. If legacy and atomic journals coexist, they must describe the
+same transaction before legacy bytes are cleared. Final cleanup atomically
+exchanges and verifies the expected journal, preserving swapped or corrupted
+evidence instead of unlinking it; do not delete the journal to bypass that
+refusal. Unrelated
 configuration, guidance, agents, and plugin caches are outside this mode's
 write set. Supported full/light overrides remain valid through profile checks
 and bootstrap reinstalls. The two focused modes cannot be combined, and

@@ -1315,6 +1315,7 @@ def _write_journal_at(directory_descriptor, metadata):
             dst_dir_fd=directory_descriptor,
         )
         _fsync_directory(directory_descriptor)
+        return _canonical_transaction_metadata(metadata)
     except Exception:
         if descriptor is not None:
             os.close(descriptor)
@@ -1325,19 +1326,120 @@ def _write_journal_at(directory_descriptor, metadata):
         raise
 
 
-def _remove_journal_at(directory_descriptor):
+def _restore_cleanup_exchange_at(
+    directory_descriptor,
+    temporary_name,
+    sentinel_identity,
+    sentinel_content,
+):
     try:
-        status = os.stat(
+        current_identity, current_content = _identity_and_content_for_name_at(
+            directory_descriptor,
             _MODEL_ROUTING_JOURNAL_NAME,
-            dir_fd=directory_descriptor,
-            follow_symlinks=False,
         )
-    except FileNotFoundError:
-        return
-    if not stat.S_ISREG(status.st_mode):
-        raise ValidationError("models-only transaction journal is not a regular file")
-    os.unlink(_MODEL_ROUTING_JOURNAL_NAME, dir_fd=directory_descriptor)
+    except (FileNotFoundError, ValidationError):
+        return False
+    if not _exchange_snapshot_matches(
+        current_identity,
+        current_content,
+        sentinel_identity,
+        sentinel_content,
+    ):
+        return False
+    _exchange_paths_at(
+        directory_descriptor,
+        temporary_name,
+        _MODEL_ROUTING_JOURNAL_NAME,
+    )
     _fsync_directory(directory_descriptor)
+    restored_identity, restored_content = _identity_and_content_for_name_at(
+        directory_descriptor,
+        temporary_name,
+    )
+    if not _exchange_snapshot_matches(
+        restored_identity,
+        restored_content,
+        sentinel_identity,
+        sentinel_content,
+    ):
+        return False
+    os.unlink(temporary_name, dir_fd=directory_descriptor)
+    _fsync_directory(directory_descriptor)
+    return True
+
+
+def _remove_journal_at(directory_descriptor, expected_metadata):
+    if expected_metadata is None:
+        try:
+            os.stat(
+                _MODEL_ROUTING_JOURNAL_NAME,
+                dir_fd=directory_descriptor,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            return
+        raise ValidationError("unexpected models-only transaction journal")
+    sentinel_content = ("journal-cleanup-{0}\n".format(uuid.uuid4().hex)).encode(
+        "utf-8"
+    )
+    temporary_name, descriptor = _create_temporary_file_at(
+        directory_descriptor,
+        "provider-model-routing.journal.cleanup",
+    )
+    exchanged = False
+    try:
+        _write_all(descriptor, sentinel_content)
+        os.fsync(descriptor)
+        sentinel_identity = _file_identity_from_descriptor(descriptor)
+        os.close(descriptor)
+        descriptor = None
+        _exchange_paths_at(
+            directory_descriptor,
+            temporary_name,
+            _MODEL_ROUTING_JOURNAL_NAME,
+        )
+        exchanged = True
+        _fsync_directory(directory_descriptor)
+        current_identity, current_content = _identity_and_content_for_name_at(
+            directory_descriptor,
+            _MODEL_ROUTING_JOURNAL_NAME,
+        )
+        sentinel_is_current = _exchange_snapshot_matches(
+            current_identity,
+            current_content,
+            sentinel_identity,
+            sentinel_content,
+        )
+        displaced_identity, displaced_content = _identity_and_content_for_name_at(
+            directory_descriptor,
+            temporary_name,
+        )
+        del displaced_identity
+        observed_metadata = _decode_journal(displaced_content)
+        observed_canonical = _canonical_transaction_metadata(observed_metadata)
+        if not sentinel_is_current or observed_canonical != expected_metadata:
+            raise ValidationError(
+                "models-only transaction journal changed before cleanup"
+            )
+        os.unlink(temporary_name, dir_fd=directory_descriptor)
+        os.unlink(_MODEL_ROUTING_JOURNAL_NAME, dir_fd=directory_descriptor)
+        _fsync_directory(directory_descriptor)
+    except Exception:
+        if descriptor is not None:
+            os.close(descriptor)
+        if exchanged:
+            _restore_cleanup_exchange_at(
+                directory_descriptor,
+                temporary_name,
+                sentinel_identity,
+                sentinel_content,
+            )
+        else:
+            try:
+                os.unlink(temporary_name, dir_fd=directory_descriptor)
+            except FileNotFoundError:
+                pass
+        raise
 
 
 def _cleanup_journal_temps_at(directory_descriptor):
@@ -1383,9 +1485,17 @@ def _acquire_model_routing_lock(codex_home):
         try:
             metadata = _read_journal_at(directory_descriptor)
             legacy_raw = _read_all(descriptor)
-            if metadata is None and legacy_raw:
-                metadata = _decode_transaction_metadata(legacy_raw)
-                _write_journal_at(directory_descriptor, metadata)
+            if legacy_raw:
+                legacy_metadata = _decode_transaction_metadata(legacy_raw)
+                if metadata is None:
+                    metadata = legacy_metadata
+                    _write_journal_at(directory_descriptor, metadata)
+                elif _canonical_transaction_metadata(
+                    legacy_metadata
+                ) != _canonical_transaction_metadata(metadata):
+                    raise ValidationError(
+                        "legacy and atomic model-routing journals conflict"
+                    )
             if legacy_raw:
                 os.ftruncate(descriptor, 0)
                 os.fsync(descriptor)
@@ -1486,11 +1596,10 @@ def _recover_stale_transaction(codex_home, metadata, directory_descriptors):
         raise ValidationError("models-only transaction target metadata is malformed")
     journal_directory_descriptor = directory_descriptors[codex_home]
     if phase == "recovered":
-        return
+        return _canonical_transaction_metadata(metadata)
     if phase == "backups":
         metadata["phase"] = "recovered"
-        _write_journal_at(journal_directory_descriptor, metadata)
-        return
+        return _write_journal_at(journal_directory_descriptor, metadata)
     if phase not in ("applying", "committing", "rolling-back", "recovery-required"):
         raise ValidationError("models-only transaction phase is malformed")
 
@@ -1534,7 +1643,7 @@ def _recover_stale_transaction(codex_home, metadata, directory_descriptors):
         ):
             raise ValidationError("stale-owner recovery could not restore model routing")
     metadata["phase"] = "recovered"
-    _write_journal_at(journal_directory_descriptor, metadata)
+    return _write_journal_at(journal_directory_descriptor, metadata)
 
 
 def apply_model_routing_update(codex_home, full_model, light_model, config_path=None):
@@ -1552,11 +1661,16 @@ def apply_model_routing_update(codex_home, full_model, light_model, config_path=
     lock_descriptor, stale_metadata = _acquire_model_routing_lock(codex_home)
     directory_descriptors = None
     preserve_journal = stale_metadata is not None
+    expected_journal = (
+        _canonical_transaction_metadata(stale_metadata)
+        if stale_metadata is not None
+        else None
+    )
     try:
         directory_descriptors = _open_model_routing_directories(codex_home)
         journal_directory_descriptor = directory_descriptors[codex_home]
         if stale_metadata is not None:
-            _recover_stale_transaction(
+            expected_journal = _recover_stale_transaction(
                 codex_home,
                 stale_metadata,
                 directory_descriptors,
@@ -1570,7 +1684,7 @@ def apply_model_routing_update(codex_home, full_model, light_model, config_path=
         )
         updates = plan.updates
         metadata = _transaction_metadata(codex_home, plan)
-        _write_journal_at(journal_directory_descriptor, metadata)
+        expected_journal = _write_journal_at(journal_directory_descriptor, metadata)
         _fsync_directory(directory_descriptors[codex_home])
         backups = {}
         entries = {entry["path"]: entry for entry in metadata["targets"]}
@@ -1584,9 +1698,12 @@ def apply_model_routing_update(codex_home, full_model, light_model, config_path=
             _assert_parent_identities(state)
             entry = entries[path.relative_to(codex_home).as_posix()]
             entry["backup"] = backups[path].relative_to(codex_home).as_posix()
-            _write_journal_at(journal_directory_descriptor, metadata)
+            expected_journal = _write_journal_at(
+                journal_directory_descriptor,
+                metadata,
+            )
         metadata["phase"] = "applying"
-        _write_journal_at(journal_directory_descriptor, metadata)
+        expected_journal = _write_journal_at(journal_directory_descriptor, metadata)
         replaced = []
         try:
             for path, content in updates.items():
@@ -1608,9 +1725,15 @@ def apply_model_routing_update(codex_home, full_model, light_model, config_path=
                 entry["displaced"] = path.with_name(
                     replacement.displaced_name
                 ).relative_to(codex_home).as_posix()
-                _write_journal_at(journal_directory_descriptor, metadata)
+                expected_journal = _write_journal_at(
+                    journal_directory_descriptor,
+                    metadata,
+                )
             metadata["phase"] = "committing"
-            _write_journal_at(journal_directory_descriptor, metadata)
+            expected_journal = _write_journal_at(
+                journal_directory_descriptor,
+                metadata,
+            )
             for replacement in replaced:
                 directory_descriptor = _directory_descriptor_for(
                     replacement.state,
@@ -1619,7 +1742,10 @@ def apply_model_routing_update(codex_home, full_model, light_model, config_path=
                 _commit_replacement_at(directory_descriptor, replacement)
         except Exception as error:
             metadata["phase"] = "rolling-back"
-            _write_journal_at(journal_directory_descriptor, metadata)
+            expected_journal = _write_journal_at(
+                journal_directory_descriptor,
+                metadata,
+            )
             try:
                 for replacement in reversed(replaced):
                     directory_descriptor = _directory_descriptor_for(
@@ -1631,7 +1757,10 @@ def apply_model_routing_update(codex_home, full_model, light_model, config_path=
                 metadata["phase"] = "recovery-required"
                 metadata["recovery_error"] = str(rollback_error)
                 preserve_journal = True
-                _write_journal_at(journal_directory_descriptor, metadata)
+                expected_journal = _write_journal_at(
+                    journal_directory_descriptor,
+                    metadata,
+                )
                 raise OSError(
                     "model routing update failed and rollback was incomplete: {0}".format(
                         rollback_error
@@ -1641,7 +1770,10 @@ def apply_model_routing_update(codex_home, full_model, light_model, config_path=
                 metadata["phase"] = "recovery-required"
                 metadata["recovery_error"] = str(error)
                 preserve_journal = True
-                _write_journal_at(journal_directory_descriptor, metadata)
+                expected_journal = _write_journal_at(
+                    journal_directory_descriptor,
+                    metadata,
+                )
                 raise OSError(
                     "model routing update stopped with recoverable transaction state: {0}".format(
                         error
@@ -1652,7 +1784,10 @@ def apply_model_routing_update(codex_home, full_model, light_model, config_path=
     finally:
         if directory_descriptors is not None:
             if not preserve_journal:
-                _remove_journal_at(directory_descriptors[codex_home])
+                _remove_journal_at(
+                    directory_descriptors[codex_home],
+                    expected_journal,
+                )
             _close_model_routing_directories(directory_descriptors)
         _release_model_routing_lock(lock_descriptor)
 

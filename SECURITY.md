@@ -20,8 +20,11 @@ credentials are not. Treat any unexpected secret-like value in the repository
 as a security issue.
 
 Credential-only reconfiguration keeps input hidden, passes it to the bundled
-Keychain helper over standard input, and does not read or write configuration.
+Keychain helper over standard input, and skips the configuration merge/write
+path; the transformer is invoked only to validate the provider ID.
 Models-only reconfiguration never accesses Keychain or plugin caches. It
 requires exact `personal-workflows` ownership markers, refuses symlinked or
-malformed targets, and uses backups, atomic replacement, and rollback to avoid
-mixed model assignments.
+malformed targets, and uses backups, atomic pathname exchange, verified
+post-replacement identities, and durable owner/transaction metadata. A later
+run recovers a stale interrupted transaction before applying new assignments;
+unexpected external target content is preserved rather than overwritten.

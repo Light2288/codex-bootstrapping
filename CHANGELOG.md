@@ -3,11 +3,12 @@
 ## Unreleased
 
 - Add deterministic full/light implementation model routing and the thin
-  `$implement-lite` entry point while preserving the integrated Sol quality
-  review gate.
+  `$implement-lite` entry point while preserving the configurable full-role
+  quality review gate (Sol by default).
 - Add mutually exclusive credential-only and models-only provider
   reconfiguration. Model updates are ownership-bounded, backed up, atomic, and
-  rollback-capable; credential rotation remains hidden and Keychain-only.
+  recoverable after stale-owner termination; credential rotation remains
+  hidden and Keychain-only.
 
 All notable changes to this project are documented in this file.
 

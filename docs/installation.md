@@ -43,10 +43,14 @@ To rotate a configured provider credential without changing `config.toml`, use
 full/light routing after the profile is installed, use
 `zsh scripts/configure-provider.zsh --models-only`. The latter validates all
 owned targets before writing, creates sibling backups, applies atomic
-replacements, and rolls already-written files back if the transaction fails.
-It refuses missing, malformed, symlinked, or unmanaged targets instead of
-partially repairing them. See [provider configuration](provider-configuration.md)
-for the prompts and exact assignment rules.
+pathname exchanges, and rolls already-written files back if the transaction
+fails. Durable owner metadata lets a later run recover a process that was
+terminated mid-update without manually deleting a lock. It refuses missing,
+malformed, symlinked, unmanaged, or externally changed targets instead of
+overwriting them. Supported custom assignments are normalized through later
+profile checks and bootstrap reinstalls. See
+[provider configuration](provider-configuration.md) for the prompts and exact
+assignment rules.
 
 ## Verification
 

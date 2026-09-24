@@ -47,16 +47,18 @@ rather than inventing a replacement. Retain the exact command, exit status,
 and decisive proof line for the final review package; label evidence that was
 not observed as `unobserved`.
 
-Interpret each task's `[S|M|L | risk: ...]` metadata without inferring missing
-values. Resolve the requested tier from an explicit current entry-point or
-user request first, then from the plan's `Execution tier`; a request for
-`lite` is not an eligibility override. Use `lite` only when every task is S or
-M, `risk: none`, mechanical, grounded in an existing pattern, and objectively
-verifiable. Missing or invalid metadata, an L task, any non-`none` risk,
-or any full-only concern selects or escalates to `full`. The full-only
-concerns are `ambiguous`, `borderline`, `security`, `auth`, `data`,
-`migrations`, `concurrency`, and `performance`. Record the selected tier and
-every conservative escalation.
+Read each task's exact `[size: ... | risk: ... | mechanical: ... |
+clear_pattern: ... | objectively_verifiable: ... | concerns: ...]` heading
+metadata without deriving a value from prose. Resolve the requested tier from
+an explicit current entry-point or user request first, then from the plan's
+`Execution tier`; a request for `lite` is not an eligibility override. Use
+`lite` only when every task is S or M, records `risk: none`, records
+`mechanical`, `clear_pattern`, and `objectively_verifiable` as `true`, and
+records `concerns: none`. Missing, duplicated, or invalid metadata, an L task,
+any non-`none` risk, or any full-only concern selects or escalates to `full`.
+The full-only concerns are `ambiguous`, `borderline`, `security`, `auth`,
+`data`, `migrations`, `concurrency`, and `performance`. Record the selected
+tier and every conservative escalation.
 
 Resolve the exact model from the active personal-workflows managed model
 routing block. Its default role mapping is `light` = `gpt-5.6-luna` and
@@ -87,9 +89,11 @@ during, or after it. Its two stages and any permitted targeted follow-up remain
 one seat and inherit the enclosing base's fix-loop limit.
 
 The review route is independent of the implementation tier: `review-spec`
-performs specification adherence on `gpt-5.6-luna`, then `review-quality`
-owns the final code-quality, security, and production-risk judgment on
-`gpt-5.6-sol`. Never route that second-stage judgment to the light model.
+performs specification adherence on the resolved configurable `light` role,
+then `review-quality` owns the final code-quality, security, and
+production-risk judgment on the resolved configurable `full` role. With the
+shipped defaults these are exactly `gpt-5.6-luna` and `gpt-5.6-sol`,
+respectively. Never route the second-stage judgment to the light role.
 
 Only after that gate is passed or its findings are handled under the enclosing
 base policy may branch finishing begin. `code-review` is this wrapper's

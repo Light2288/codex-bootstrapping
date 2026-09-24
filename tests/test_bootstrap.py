@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "bootstrap-macos.zsh"
 PROFILE_INSTALLER = ROOT / "plugins" / "personal-workflows" / "scripts" / "install_profile.py"
+PROVIDER_TRANSFORMER = ROOT / "scripts" / "provider_config.py"
 
 
 class BootstrapTest(unittest.TestCase):
@@ -336,6 +337,53 @@ class BootstrapTest(unittest.TestCase):
             self.assertEqual(calls, [])
             self.assertIn("Superpowers: installed", result.stdout)
             self.assertIn("personal-workflows: installed", result.stdout)
+
+    def test_models_only_overrides_survive_bootstrap_check_and_reinstall(self):
+        """Bootstrap health and reinstall must normalize supported routing overrides."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            home = temporary / "codex-home"
+            self.install_complete_profile(home)
+            (home / "config.toml").write_text(
+                'model = "packaged-full"\nmodel_provider = "ibm_ica"\n',
+                encoding="utf-8",
+            )
+            update = subprocess.run(
+                [
+                    sys.executable,
+                    str(PROVIDER_TRANSFORMER),
+                    "--config",
+                    str(home / "config.toml"),
+                    "--models-only",
+                    "--full-model",
+                    "supported-full",
+                    "--light-model",
+                    "supported-light",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(update.returncode, 0, (update.stdout, update.stderr))
+
+            checked, check_calls, _ = self.run_bootstrap(temporary, "--check")
+
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+            self.assertEqual(check_calls, [])
+
+            installed, _, _ = self.run_bootstrap(temporary, input_text="y\n")
+
+            self.assertEqual(installed.returncode, 0, installed.stderr)
+            self.assertIn(
+                "- `full`: `supported-full`",
+                (home / "AGENTS.md").read_text(encoding="utf-8"),
+            )
+            self.assertIn(
+                'model = "supported-light"',
+                (home / "agents" / "review-spec.toml").read_text(
+                    encoding="utf-8"
+                ),
+            )
 
     def test_check_rejects_drifted_guidance_or_agent_without_invoking_codex(self):
         """A success status despite changed managed files would hide a broken profile."""

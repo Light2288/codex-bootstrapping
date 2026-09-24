@@ -3,7 +3,9 @@
 import importlib.util
 import builtins
 import hashlib
+import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -26,6 +28,9 @@ from scripts.provider_config import (
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "provider_config.py"
 WRAPPER = ROOT / "scripts" / "configure-provider.zsh"
+PROFILE_INSTALLER = (
+    ROOT / "plugins" / "personal-workflows" / "scripts" / "install_profile.py"
+)
 
 
 class ProviderConfigTest(unittest.TestCase):
@@ -665,7 +670,7 @@ class ProviderConfigTest(unittest.TestCase):
             self.assertEqual(state.read_text(encoding="utf-8"), secret)
             self.assertEqual(
                 operations.read_text(encoding="utf-8").splitlines(),
-                ["check", "get", "set"],
+                ["check", "set"],
             )
             self.assertNotIn(secret, arguments.read_text(encoding="utf-8"))
             self.assertNotIn(secret, result.stdout)
@@ -751,6 +756,166 @@ class ProviderConfigTest(unittest.TestCase):
             self.assertIn("cannot be combined", result.stderr)
             self.assertEqual(self.tree_contents(codex_home), before)
 
+    def test_focused_modes_reject_smoke_test_before_any_side_effect(self):
+        """Accepting a focused smoke test while ignoring it misstates the requested run."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            codex_home = self.create_managed_codex_home(temporary)
+            before = self.tree_contents(codex_home)
+            helper_log = temporary / "keychain-helper-called"
+            helper = temporary / "fake-keychain-helper"
+            helper.write_text(
+                "#!{0}\nfrom pathlib import Path\nPath({1!r}).write_text('called')\n".format(
+                    sys.executable, str(helper_log)
+                ),
+                encoding="utf-8",
+            )
+            helper.chmod(0o755)
+
+            for focused_mode in ("--credential-only", "--models-only"):
+                with self.subTest(focused_mode=focused_mode):
+                    result = subprocess.run(
+                        ["zsh", str(WRAPPER), focused_mode, "--smoke-test"],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        env=dict(
+                            os.environ,
+                            CODEX_HOME=str(codex_home),
+                            CODEX_PROVIDER_KEYCHAIN_HELPER=str(helper),
+                        ),
+                    )
+
+                    self.assertEqual(result.returncode, 2)
+                    self.assertIn("--smoke-test", result.stderr)
+                    self.assertEqual(self.tree_contents(codex_home), before)
+                    self.assertFalse(helper_log.exists())
+
+    def test_models_only_honors_the_exact_config_filename(self):
+        """Replacing config.toml when --config named another file is a data-loss bug."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            codex_home = self.create_managed_codex_home(temporary)
+            selected = codex_home / "alternate.toml"
+            selected.write_bytes((codex_home / "config.toml").read_bytes())
+            decoy = codex_home / "config.toml"
+            decoy_before = decoy.read_bytes()
+
+            result = subprocess.run(
+                [
+                    "zsh",
+                    str(WRAPPER),
+                    "--config",
+                    str(selected),
+                    "--models-only",
+                ],
+                check=False,
+                capture_output=True,
+                input="supported-full\nsupported-light\ny\n",
+                text=True,
+                env=dict(os.environ, CODEX_HOME=str(temporary / "ignored-home")),
+            )
+
+            self.assertEqual(result.returncode, 0, (result.stdout, result.stderr))
+            self.assertIn('model = "supported-full"\n', selected.read_text(encoding="utf-8"))
+            self.assertEqual(decoy.read_bytes(), decoy_before)
+            self.assertTrue(list(codex_home.glob("alternate.toml.backup.*")))
+            self.assertFalse(list(codex_home.glob("config.toml.backup.*")))
+
+    def test_models_only_overrides_survive_profile_check_and_reinstall(self):
+        """A supported routing override must not become profile drift on reinstall."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            codex_home = temporary / "codex-home"
+            initial_install = subprocess.run(
+                [
+                    sys.executable,
+                    str(PROFILE_INSTALLER),
+                    "--codex-home",
+                    str(codex_home),
+                    "--install",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(initial_install.returncode, 0, initial_install.stderr)
+            (codex_home / "config.toml").write_text(
+                'model = "packaged-full"\nmodel_provider = "ibm_ica"\n',
+                encoding="utf-8",
+            )
+            cache_sentinel = codex_home / "plugins" / "cache" / "sentinel.txt"
+            cache_sentinel.parent.mkdir(parents=True)
+            cache_sentinel.write_text("unchanged\n", encoding="utf-8")
+
+            update = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--config",
+                    str(codex_home / "config.toml"),
+                    "--models-only",
+                    "--full-model",
+                    "supported-full",
+                    "--light-model",
+                    "supported-light",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(update.returncode, 0, (update.stdout, update.stderr))
+
+            check = subprocess.run(
+                [
+                    sys.executable,
+                    str(PROFILE_INSTALLER),
+                    "--codex-home",
+                    str(codex_home),
+                    "--check",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(check.returncode, 0, check.stderr)
+            check_report = json.loads(check.stdout)
+            self.assertEqual(check_report["guidance"], "unchanged")
+            self.assertTrue(
+                all(status == "unchanged" for status in check_report["agents"].values())
+            )
+
+            reinstall = subprocess.run(
+                [
+                    sys.executable,
+                    str(PROFILE_INSTALLER),
+                    "--codex-home",
+                    str(codex_home),
+                    "--install",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(reinstall.returncode, 0, reinstall.stderr)
+            self.assertIn(
+                "- `full`: `supported-full`",
+                (codex_home / "AGENTS.md").read_text(encoding="utf-8"),
+            )
+            self.assertIn(
+                'model = "supported-light"',
+                (codex_home / "agents" / "review-spec.toml").read_text(
+                    encoding="utf-8"
+                ),
+            )
+            self.assertIn(
+                'model = "supported-full"',
+                (codex_home / "agents" / "review-quality.toml").read_text(
+                    encoding="utf-8"
+                ),
+            )
+            self.assertEqual(cache_sentinel.read_text(encoding="utf-8"), "unchanged\n")
+
     def test_models_only_refuses_unmanaged_or_malformed_targets_without_partial_writes(self):
         """Ownership or structure ambiguity must stop the transaction before the first backup."""
         mutations = {
@@ -807,16 +972,20 @@ class ProviderConfigTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             codex_home = self.create_managed_codex_home(Path(directory))
             before = self.tree_contents(codex_home)
-            real_replace = os.replace
+            real_exchange = provider_config._exchange_paths_at
             calls = {"count": 0}
 
-            def fail_third_replace(source, destination, *args, **kwargs):
+            def fail_third_exchange(directory_descriptor, first, second):
                 calls["count"] += 1
                 if calls["count"] == 3:
                     raise OSError("injected atomic replacement failure")
-                return real_replace(source, destination, *args, **kwargs)
+                return real_exchange(directory_descriptor, first, second)
 
-            with patch.object(provider_config.os, "replace", side_effect=fail_third_replace):
+            with patch.object(
+                provider_config,
+                "_exchange_paths_at",
+                side_effect=fail_third_exchange,
+            ):
                 with self.assertRaises(OSError):
                     provider_config.apply_model_routing_update(
                         codex_home,
@@ -828,6 +997,196 @@ class ProviderConfigTest(unittest.TestCase):
             for relative, contents in before.items():
                 self.assertEqual(after[relative], contents, relative)
             self.assertEqual(len(list(codex_home.rglob("*.backup.*"))), 7)
+
+    def test_models_only_does_not_overwrite_an_exact_target_swapped_after_verification(self):
+        """A same-directory target swap after verification must survive unchanged."""
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = self.create_managed_codex_home(Path(directory))
+            target = (codex_home / "config.toml").resolve()
+            moved_original = codex_home / "config.original"
+            unexpected = b'model = "external-owner"\n'
+            real_open = provider_config._open_verified_file_at
+            target_opens = {"count": 0}
+            swapped = {"done": False}
+
+            def open_then_swap(directory_descriptor, state):
+                descriptor = real_open(directory_descriptor, state)
+                if state.path == target:
+                    target_opens["count"] += 1
+                    if target_opens["count"] == 2:
+                        target.rename(moved_original)
+                        target.write_bytes(unexpected)
+                        swapped["done"] = True
+                return descriptor
+
+            with patch.object(
+                provider_config,
+                "_open_verified_file_at",
+                side_effect=open_then_swap,
+            ):
+                with self.assertRaises((ValidationError, OSError)):
+                    provider_config.apply_model_routing_update(
+                        codex_home,
+                        "gpt-5.6-sol",
+                        "gpt-5.6-luna",
+                    )
+
+            self.assertTrue(swapped["done"])
+            self.assertEqual(target.read_bytes(), unexpected)
+            self.assertTrue(moved_original.exists())
+
+    def test_models_only_does_not_overwrite_an_exact_target_edited_after_verification(self):
+        """An in-place edit after verification must survive the attempted exchange."""
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = self.create_managed_codex_home(Path(directory))
+            target = (codex_home / "config.toml").resolve()
+            unexpected = b'model = "external-in-place-edit"\n'
+            real_open = provider_config._open_verified_file_at
+            target_opens = {"count": 0}
+            edited = {"done": False}
+
+            def open_then_edit(directory_descriptor, state):
+                descriptor = real_open(directory_descriptor, state)
+                if state.path == target:
+                    target_opens["count"] += 1
+                    if target_opens["count"] == 2:
+                        target.write_bytes(unexpected)
+                        edited["done"] = True
+                return descriptor
+
+            with patch.object(
+                provider_config,
+                "_open_verified_file_at",
+                side_effect=open_then_edit,
+            ):
+                with self.assertRaises((ValidationError, OSError)):
+                    provider_config.apply_model_routing_update(
+                        codex_home,
+                        "gpt-5.6-sol",
+                        "gpt-5.6-luna",
+                    )
+
+            self.assertTrue(edited["done"])
+            self.assertEqual(target.read_bytes(), unexpected)
+
+    def test_models_only_rollback_preserves_an_exact_target_edited_after_replacement(self):
+        """Rollback must not overwrite content edited after this transaction replaced it."""
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = self.create_managed_codex_home(Path(directory))
+            target = codex_home / "config.toml"
+            external_edit = b'model = "external-post-replacement-edit"\n'
+            real_replace = provider_config._atomic_replace_content_at
+            replacements = {"count": 0}
+
+            def edit_first_then_fail_second(directory_descriptor, state, content):
+                replacements["count"] += 1
+                if replacements["count"] == 2:
+                    raise OSError("injected later replacement failure")
+                result = real_replace(directory_descriptor, state, content)
+                if replacements["count"] == 1:
+                    target.write_bytes(external_edit)
+                return result
+
+            with patch.object(
+                provider_config,
+                "_atomic_replace_content_at",
+                side_effect=edit_first_then_fail_second,
+            ):
+                with self.assertRaises(OSError):
+                    provider_config.apply_model_routing_update(
+                        codex_home,
+                        "gpt-5.6-sol",
+                        "gpt-5.6-luna",
+                    )
+
+            self.assertEqual(target.read_bytes(), external_edit)
+            lock = codex_home / ".provider-model-routing.lock"
+            self.assertTrue(lock.exists())
+            self.assertTrue(lock.read_bytes())
+
+    def test_models_only_recovers_an_empty_stale_lock_before_updating(self):
+        """An unheld empty legacy lock must not require blind manual deletion."""
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = self.create_managed_codex_home(Path(directory))
+            lock = codex_home / ".provider-model-routing.lock"
+            lock.touch(mode=0o600)
+
+            provider_config.apply_model_routing_update(
+                codex_home,
+                "recovered-full",
+                "recovered-light",
+            )
+
+            self.assertFalse(lock.exists())
+            self.assertIn(
+                'model = "recovered-full"',
+                (codex_home / "config.toml").read_text(encoding="utf-8"),
+            )
+
+    def test_models_only_recovers_a_hard_terminated_partial_transaction(self):
+        """A dead owner must be recovered without deleting a blind empty lock."""
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = self.create_managed_codex_home(Path(directory))
+            child_code = """
+import os
+import signal
+from pathlib import Path
+import scripts.provider_config as provider_config
+
+home = Path(os.environ["TEST_CODEX_HOME"])
+real_replace = provider_config._atomic_replace_content_at
+replacements = {"count": 0}
+
+def replace_then_terminate(directory_descriptor, state, content):
+    result = real_replace(directory_descriptor, state, content)
+    replacements["count"] += 1
+    if replacements["count"] == 1:
+        os.kill(os.getpid(), signal.SIGKILL)
+    return result
+
+provider_config._atomic_replace_content_at = replace_then_terminate
+provider_config.apply_model_routing_update(home, "recovered-full", "recovered-light")
+"""
+            child = subprocess.run(
+                [sys.executable, "-c", child_code],
+                check=False,
+                capture_output=True,
+                text=True,
+                cwd=ROOT,
+                env=dict(os.environ, TEST_CODEX_HOME=str(codex_home)),
+            )
+
+            self.assertEqual(child.returncode, -signal.SIGKILL)
+            lock = codex_home / ".provider-model-routing.lock"
+            self.assertTrue(lock.exists())
+            self.assertTrue(lock.read_bytes())
+            journal = json.loads(lock.read_text(encoding="utf-8"))
+            self.assertEqual(journal["version"], 1)
+            self.assertEqual(journal["phase"], "applying")
+            self.assertIsInstance(journal["owner"]["pid"], int)
+            self.assertGreater(journal["owner"]["pid"], 0)
+            self.assertNotEqual(journal["owner"]["pid"], os.getpid())
+            self.assertTrue(journal["transaction_id"])
+            self.assertTrue(all(target["backup"] for target in journal["targets"]))
+            self.assertTrue(all(target["desired_sha256"] for target in journal["targets"]))
+
+            provider_config.apply_model_routing_update(
+                codex_home,
+                "recovered-full",
+                "recovered-light",
+            )
+
+            self.assertFalse(lock.exists())
+            self.assertIn(
+                'model = "recovered-full"',
+                (codex_home / "config.toml").read_text(encoding="utf-8"),
+            )
+            self.assertIn(
+                'model = "recovered-light"',
+                (codex_home / "agents" / "review-spec.toml").read_text(
+                    encoding="utf-8"
+                ),
+            )
 
     def test_models_only_skips_a_broken_symlink_backup_collision(self):
         """Following or reusing a broken backup symlink can escape or block the target directory."""

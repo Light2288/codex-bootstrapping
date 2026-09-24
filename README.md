@@ -59,7 +59,9 @@ zsh scripts/configure-provider.zsh --models-only
 These modes are mutually exclusive. Credential-only mode does not change
 configuration files. Models-only mode changes the top-level default model and
 only ownership-marked `personal-workflows` guidance and agent profiles; it
-backs up every changed file and never edits plugin caches.
+backs up every changed file, recovers stale interrupted transactions, and
+never edits plugin caches. Supported custom full/light assignments survive
+profile checks and bootstrap reinstalls.
 
 ## Update, verify, and uninstall
 

@@ -36,16 +36,19 @@ the Superpowers location and record `Slug` and `Provenance` metadata.
 ## Personal planning delta
 
 Keep every field in the Superpowers plan header and its checkbox task format.
-Add an execution-tier selection and append this metadata to every task
-heading:
+Add an execution-tier selection and append all routing inputs to every task
+heading using this exact field order and spelling:
 
-`[<S|M|L> | risk: <none|security|data|concurrency|migrations|other>]`
+`[size: <S|M|L> | risk: <none|security|data|concurrency|migrations|other> | mechanical: <true|false> | clear_pattern: <true|false> | objectively_verifiable: <true|false> | concerns: <none|comma-separated full-only concerns>]`
 
 Size is delivery effort; risk is the one material review domain. Explain any
 non-`none` risk and split tasks that combine materially different risk
-domains. Select `lite` only when every task is S or M, every risk is
-`none`, the work is mechanical, existing patterns are clear, and verification
-is objective. Otherwise select `full`; borderline work is `full`.
+domains. `concerns` records `none` or any applicable `ambiguous`, `borderline`,
+`security`, `auth`, `data`, `migrations`, `concurrency`, or `performance`
+concern. Never omit a routing field or infer its value from task prose. Select
+`lite` only when every task is S or M, every risk is `none`, every task records
+all three boolean eligibility fields as `true`, and every task records
+`concerns: none`. Otherwise select `full`; borderline work is `full`.
 
 Record the selection once in the plan header, using these exact fields:
 

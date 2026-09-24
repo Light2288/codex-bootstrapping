@@ -9,7 +9,8 @@
         "risk": "none",
         "mechanical": true,
         "clear_pattern": true,
-        "objectively_verifiable": true
+        "objectively_verifiable": true,
+        "concerns": []
       }
     ],
     "expected_tier": "lite",
@@ -25,7 +26,8 @@
         "risk": "none",
         "mechanical": true,
         "clear_pattern": true,
-        "objectively_verifiable": true
+        "objectively_verifiable": true,
+        "concerns": []
       }
     ],
     "expected_tier": "full",
@@ -41,7 +43,8 @@
         "risk": "none",
         "mechanical": true,
         "clear_pattern": true,
-        "objectively_verifiable": true
+        "objectively_verifiable": true,
+        "concerns": []
       }
     ],
     "expected_tier": "full",
@@ -57,7 +60,8 @@
         "risk": "security",
         "mechanical": true,
         "clear_pattern": true,
-        "objectively_verifiable": true
+        "objectively_verifiable": true,
+        "concerns": []
       }
     ],
     "expected_tier": "full",
@@ -72,7 +76,8 @@
         "size": "S",
         "risk": "none",
         "mechanical": true,
-        "clear_pattern": true
+        "clear_pattern": true,
+        "concerns": []
       }
     ],
     "expected_tier": "full",
@@ -207,7 +212,8 @@
         "risk": "none",
         "mechanical": true,
         "clear_pattern": true,
-        "objectively_verifiable": true
+        "objectively_verifiable": true,
+        "concerns": []
       }
     ],
     "expected_tier": "lite",

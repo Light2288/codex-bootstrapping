@@ -24,8 +24,9 @@ configured marketplace before using these workflows.
 
 `spec-plan` records an execution tier and managed implementation-model role.
 `spec-implement` uses `gpt-5.6-luna` only for eligible light subagent work and
-uses `gpt-5.6-sol` for full or escalated subagent work. `$implement-lite` is a
-thin light-route request; it cannot bypass eligibility or escalation. Inline
-execution cannot change the current parent model. The final review remains a
-Luna specification-adherence stage followed by a Sol code-quality and
-security stage.
+uses `gpt-5.6-sol` for full or escalated subagent work by default.
+`$implement-lite` is a thin light-route request; it cannot bypass eligibility
+or escalation. Inline execution cannot change the current parent model. The
+final review uses the configurable light role for specification adherence and
+the configurable full role for code quality and security; Luna and Sol are the
+exact shipped defaults for those roles, not permanently pinned reviewer names.

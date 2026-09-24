@@ -19,6 +19,14 @@
         "execution_tier",
         "implementation_model_role"
       ],
+      "required_task_routing_fields": [
+        "size",
+        "risk",
+        "mechanical",
+        "clear_pattern",
+        "objectively_verifiable",
+        "concerns"
+      ],
       "tier_to_model_role": {
         "lite": "light",
         "full": "full"
@@ -44,7 +52,8 @@
         "risk",
         "mechanical",
         "clear_pattern",
-        "objectively_verifiable"
+        "objectively_verifiable",
+        "concerns"
       ],
       "allowed_sizes": ["S", "M"],
       "required_risk": "none"
@@ -69,9 +78,9 @@
         "limitation": "cannot-switch-parent-model"
       }
     },
-    "final_review_models": {
-      "review-spec": "gpt-5.6-luna",
-      "review-quality": "gpt-5.6-sol"
+    "final_review_model_roles": {
+      "review-spec": "light",
+      "review-quality": "full"
     }
   },
   "execution_routes": {

@@ -117,6 +117,7 @@ target_health_report() {
 from __future__ import print_function
 
 import json
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -149,35 +150,35 @@ for plugin_name, label in (("superpowers", "Superpowers"), ("personal-workflows"
         print("{0}: missing".format(label))
         healthy = False
 
-expected_guidance = (plugin_root / "profile" / "global-agents-block.md").read_bytes()
-guidance_path = codex_home / "AGENTS.md"
-if not guidance_path.exists():
-    print("Guidance: missing")
+installer_path = plugin_root / "scripts" / "install_profile.py"
+spec = importlib.util.spec_from_file_location("personal_workflows_install_profile", installer_path)
+installer = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(installer)
+try:
+    profile = installer.install_profile(codex_home, plugin_root, check_only=True)
+except (OSError, UnicodeError, ValueError):
+    print("Guidance: drift")
     healthy = False
 else:
-    guidance = guidance_path.read_bytes()
-    start = b"<!-- personal-workflows:start -->"
-    end = b"<!-- personal-workflows:end -->"
-    position = guidance.find(start)
-    if guidance.count(start) != 1 or guidance.count(end) != 1 or position < 0:
+    guidance_status = profile["guidance"]
+    if guidance_status == "unchanged":
+        print("Guidance: installed")
+    elif (codex_home / "AGENTS.md").exists():
         print("Guidance: drift")
         healthy = False
-    elif guidance[position : position + len(expected_guidance)] == expected_guidance:
-        print("Guidance: installed")
     else:
-        print("Guidance: drift")
+        print("Guidance: missing")
         healthy = False
 
-for source in sorted((plugin_root / "codex-agents").glob("*.toml")):
-    destination = codex_home / "agents" / source.name
-    if not destination.exists():
-        print("Agent {0}: missing".format(source.name))
-        healthy = False
-    elif destination.read_bytes() == source.read_bytes():
-        print("Agent {0}: installed".format(source.name))
-    else:
-        print("Agent {0}: drift".format(source.name))
-        healthy = False
+    for name, status in sorted(profile["agents"].items()):
+        if status == "unchanged":
+            print("Agent {0}: installed".format(name))
+        elif status == "would-create":
+            print("Agent {0}: missing".format(name))
+            healthy = False
+        else:
+            print("Agent {0}: drift".format(name))
+            healthy = False
 
 raise SystemExit(0 if healthy else 1)
 PYTHON

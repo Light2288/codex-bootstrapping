@@ -9,13 +9,19 @@ only non-secret provider metadata.
 from __future__ import print_function
 
 import argparse
+import ctypes
 import datetime
+import errno
+import fcntl
+import hashlib
+import json
 import os
 import re
 import shutil
 import stat
 import sys
 import tempfile
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -24,6 +30,10 @@ from urllib.parse import urlparse
 
 class ValidationError(ValueError):
     """Raised when a provider setting or managed TOML section is unsafe."""
+
+
+class _RecoveryRequiredError(OSError):
+    """Raised when an exchanged pathname cannot be restored without data loss."""
 
 
 @dataclass(frozen=True)
@@ -95,6 +105,14 @@ class _ManagedFileState:
 class _ModelRoutingPlan:
     updates: dict
     states: dict
+
+
+@dataclass(frozen=True)
+class _ReplacementRecord:
+    state: _ManagedFileState
+    displaced_name: str
+    installed_identity: tuple
+    installed_sha256: str
 
 
 def _require_safe_text(name, value):
@@ -749,12 +767,22 @@ def _validate_agent_identity(existing, expected_name, path):
     _validate_toml_if_available(existing)
 
 
-def _build_model_routing_plan(codex_home, full_model, light_model):
+def _model_routing_config_path(codex_home, config_path=None):
+    codex_home = Path(codex_home).resolve()
+    if config_path is None:
+        return codex_home / "config.toml"
+    supplied = Path(os.path.abspath(str(config_path)))
+    if supplied.parent.resolve() != codex_home:
+        raise ValidationError("models-only config must be directly inside the Codex home")
+    return codex_home / supplied.name
+
+
+def _build_model_routing_plan(codex_home, full_model, light_model, config_path=None):
     """Read, validate, and snapshot the complete ownership-bounded update."""
     codex_home = Path(codex_home).resolve()
     full_model = _validate_model_name("full", full_model)
     light_model = _validate_model_name("light", light_model)
-    config_path = codex_home / "config.toml"
+    config_path = _model_routing_config_path(codex_home, config_path)
     guidance_path = codex_home / "AGENTS.md"
     states = {
         config_path: _read_stable_managed_file(config_path, "config", codex_home),
@@ -799,9 +827,14 @@ def _build_model_routing_plan(codex_home, full_model, light_model):
     return _ModelRoutingPlan(updates=updates, states=states)
 
 
-def plan_model_routing_update(codex_home, full_model, light_model):
+def plan_model_routing_update(codex_home, full_model, light_model, config_path=None):
     """Validate and render the complete ownership-bounded routing update."""
-    return _build_model_routing_plan(codex_home, full_model, light_model).updates
+    return _build_model_routing_plan(
+        codex_home,
+        full_model,
+        light_model,
+        config_path=config_path,
+    ).updates
 
 
 def _open_model_routing_directories(codex_home):
@@ -887,6 +920,24 @@ def _write_all(descriptor, content):
         view = view[written:]
 
 
+def _read_all(descriptor):
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    chunks = []
+    while True:
+        chunk = os.read(descriptor, 1024 * 1024)
+        if not chunk:
+            return b"".join(chunks)
+        chunks.append(chunk)
+
+
+def _sha256(content):
+    return hashlib.sha256(content).hexdigest()
+
+
+def _fsync_directory(directory_descriptor):
+    os.fsync(directory_descriptor)
+
+
 def _collision_safe_backup_at(directory_descriptor, state):
     sequence = 1
     while True:
@@ -922,96 +973,473 @@ def _collision_safe_backup_at(directory_descriptor, state):
             if source_descriptor is not None:
                 os.close(source_descriptor)
             os.close(backup_descriptor)
+        _fsync_directory(directory_descriptor)
         return state.path.with_name(backup_name)
 
 
-def _atomic_replace_content_at(directory_descriptor, state, content):
+def _atomic_exchange_function():
+    library = ctypes.CDLL(None, use_errno=True)
+    if sys.platform == "darwin":
+        name = "renameatx_np"
+    elif sys.platform.startswith("linux"):
+        name = "renameat2"
+    else:
+        raise ValidationError("models-only updates require atomic pathname exchange support")
+    try:
+        function = getattr(library, name)
+    except AttributeError:
+        raise ValidationError("models-only updates require atomic pathname exchange support")
+    function.argtypes = [
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    ]
+    function.restype = ctypes.c_int
+    return function
+
+
+def _exchange_paths_at(directory_descriptor, first, second):
+    function = _atomic_exchange_function()
+    result = function(
+        directory_descriptor,
+        os.fsencode(first),
+        directory_descriptor,
+        os.fsencode(second),
+        0x00000002,
+    )
+    if result != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, os.strerror(error_number))
+
+
+def _identity_for_name_at(directory_descriptor, name):
+    descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_descriptor)
+    try:
+        return _file_identity_from_descriptor(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _identity_and_content_for_name_at(directory_descriptor, name):
+    descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_descriptor)
+    try:
+        identity_before = _file_identity_from_descriptor(descriptor)
+        content = _read_all(descriptor)
+        identity_after = _file_identity_from_descriptor(descriptor)
+    finally:
+        os.close(descriptor)
+    if identity_after != identity_before:
+        raise ValidationError("managed target changed while exchange verified it")
+    return identity_before, content
+
+
+def _exchange_snapshot_matches(identity, content, expected_identity, expected_content):
+    # rename/exchange may update ctime while preserving the object and bytes.
+    return identity[:5] == expected_identity[:5] and content == expected_content
+
+
+def _atomic_replace_bytes_at(directory_descriptor, state, content, mode=None):
     source_descriptor = _open_verified_file_at(directory_descriptor, state)
     os.close(source_descriptor)
     temporary_name, temporary_descriptor = _create_temporary_file_at(
         directory_descriptor, state.path.name
     )
+    exchanged = False
     try:
-        _write_all(temporary_descriptor, content.encode("utf-8"))
-        os.fchmod(temporary_descriptor, state.mode)
+        _write_all(temporary_descriptor, content)
+        os.fchmod(temporary_descriptor, state.mode if mode is None else mode)
         os.fsync(temporary_descriptor)
+        prepared_identity = _file_identity_from_descriptor(temporary_descriptor)
         os.close(temporary_descriptor)
         temporary_descriptor = None
-        os.replace(
-            temporary_name,
+        _fsync_directory(directory_descriptor)
+        _exchange_paths_at(directory_descriptor, temporary_name, state.path.name)
+        exchanged = True
+        _fsync_directory(directory_descriptor)
+        installed_identity, installed_content = _identity_and_content_for_name_at(
+            directory_descriptor,
             state.path.name,
-            src_dir_fd=directory_descriptor,
-            dst_dir_fd=directory_descriptor,
+        )
+        if not _exchange_snapshot_matches(
+            installed_identity,
+            installed_content,
+            prepared_identity,
+            content,
+        ):
+            raise _RecoveryRequiredError(
+                "managed target changed immediately after atomic exchange"
+            )
+        displaced_identity, displaced_content = _identity_and_content_for_name_at(
+            directory_descriptor,
+            temporary_name,
+        )
+        if not _exchange_snapshot_matches(
+            displaced_identity,
+            displaced_content,
+            state.identity,
+            state.content,
+        ):
+            if _identity_for_name_at(directory_descriptor, state.path.name) == installed_identity:
+                _exchange_paths_at(directory_descriptor, temporary_name, state.path.name)
+                _fsync_directory(directory_descriptor)
+                reverted_identity, reverted_content = _identity_and_content_for_name_at(
+                    directory_descriptor,
+                    temporary_name,
+                )
+                if _exchange_snapshot_matches(
+                    reverted_identity,
+                    reverted_content,
+                    installed_identity,
+                    installed_content,
+                ):
+                    os.unlink(temporary_name, dir_fd=directory_descriptor)
+                    _fsync_directory(directory_descriptor)
+                    exchanged = False
+                else:
+                    raise _RecoveryRequiredError(
+                        "managed target changed while atomic exchange was being reversed"
+                    )
+            else:
+                raise _RecoveryRequiredError(
+                    "managed target changed before atomic exchange could be reversed"
+                )
+            raise ValidationError(
+                "managed target changed during atomic exchange: {0}".format(state.path)
+            )
+        return _ReplacementRecord(
+            state=state,
+            displaced_name=temporary_name,
+            installed_identity=installed_identity,
+            installed_sha256=_sha256(installed_content),
         )
     except Exception:
         if temporary_descriptor is not None:
             os.close(temporary_descriptor)
-        try:
-            os.unlink(temporary_name, dir_fd=directory_descriptor)
-        except OSError:
-            pass
+        if not exchanged:
+            try:
+                os.unlink(temporary_name, dir_fd=directory_descriptor)
+            except OSError:
+                pass
         raise
 
 
-def _atomic_restore_bytes_at(directory_descriptor, state):
-    temporary_name, temporary_descriptor = _create_temporary_file_at(
-        directory_descriptor, "{0}.rollback".format(state.path.name)
+def _atomic_replace_content_at(directory_descriptor, state, content):
+    return _atomic_replace_bytes_at(
+        directory_descriptor,
+        state,
+        content.encode("utf-8"),
     )
+
+
+def _assert_replacement_current(directory_descriptor, replacement):
     try:
-        _write_all(temporary_descriptor, state.content)
-        os.fchmod(temporary_descriptor, state.mode)
-        os.fsync(temporary_descriptor)
-        os.close(temporary_descriptor)
-        temporary_descriptor = None
-        os.replace(
-            temporary_name,
-            state.path.name,
-            src_dir_fd=directory_descriptor,
-            dst_dir_fd=directory_descriptor,
+        current = _identity_for_name_at(
+            directory_descriptor,
+            replacement.state.path.name,
         )
-    except Exception:
-        if temporary_descriptor is not None:
-            os.close(temporary_descriptor)
-        try:
-            os.unlink(temporary_name, dir_fd=directory_descriptor)
-        except OSError:
-            pass
-        raise
+    except (OSError, ValidationError):
+        raise ValidationError(
+            "replaced managed target changed during update: {0}".format(
+                replacement.state.path
+            )
+        )
+    if current != replacement.installed_identity:
+        raise ValidationError(
+            "replaced managed target changed during update: {0}".format(
+                replacement.state.path
+            )
+        )
+
+
+def _rollback_replacement_at(directory_descriptor, replacement):
+    _assert_replacement_current(directory_descriptor, replacement)
+    _exchange_paths_at(
+        directory_descriptor,
+        replacement.displaced_name,
+        replacement.state.path.name,
+    )
+    _fsync_directory(directory_descriptor)
+    displaced, displaced_content = _identity_and_content_for_name_at(
+        directory_descriptor,
+        replacement.displaced_name,
+    )
+    restored, restored_content = _identity_and_content_for_name_at(
+        directory_descriptor,
+        replacement.state.path.name,
+    )
+    installed_matches = (
+        displaced[:5] == replacement.installed_identity[:5]
+        and _sha256(displaced_content) == replacement.installed_sha256
+    )
+    original_matches = _exchange_snapshot_matches(
+        restored,
+        restored_content,
+        replacement.state.identity,
+        replacement.state.content,
+    )
+    if not installed_matches or not original_matches:
+        if original_matches:
+            _exchange_paths_at(
+                directory_descriptor,
+                replacement.displaced_name,
+                replacement.state.path.name,
+            )
+            _fsync_directory(directory_descriptor)
+        raise ValidationError(
+            "managed target changed during rollback: {0}".format(
+                replacement.state.path
+            )
+        )
+    os.unlink(replacement.displaced_name, dir_fd=directory_descriptor)
+    _fsync_directory(directory_descriptor)
+
+
+def _commit_replacement_at(directory_descriptor, replacement):
+    _assert_replacement_current(directory_descriptor, replacement)
+    displaced_identity, displaced_content = _identity_and_content_for_name_at(
+        directory_descriptor,
+        replacement.displaced_name,
+    )
+    if not _exchange_snapshot_matches(
+        displaced_identity,
+        displaced_content,
+        replacement.state.identity,
+        replacement.state.content,
+    ):
+        raise ValidationError(
+            "displaced managed target changed before commit: {0}".format(
+                replacement.state.path
+            )
+        )
+    os.unlink(replacement.displaced_name, dir_fd=directory_descriptor)
+    _fsync_directory(directory_descriptor)
+
+
+def _read_lock_metadata(descriptor):
+    raw = _read_all(descriptor)
+    if not raw:
+        return None
+    try:
+        metadata = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, ValueError) as error:
+        raise ValidationError("models-only transaction metadata is malformed: {0}".format(error))
+    if not isinstance(metadata, dict) or metadata.get("version") != 1:
+        raise ValidationError("models-only transaction metadata has an unsupported version")
+    return metadata
+
+
+def _write_lock_metadata(descriptor, metadata):
+    rendered = (json.dumps(metadata, sort_keys=True) + "\n").encode("utf-8")
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    os.ftruncate(descriptor, 0)
+    _write_all(descriptor, rendered)
+    os.fsync(descriptor)
 
 
 def _acquire_model_routing_lock(codex_home):
     lock_path = Path(codex_home).resolve() / ".provider-model-routing.lock"
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    flags = os.O_RDWR | os.O_CREAT
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
+    descriptor = os.open(str(lock_path), flags, 0o600)
     try:
-        descriptor = os.open(str(lock_path), flags, 0o600)
-    except FileExistsError:
-        raise ValidationError("another models-only update is already active")
-    status = os.fstat(descriptor)
-    return lock_path, descriptor, (status.st_dev, status.st_ino)
+        status = os.fstat(descriptor)
+        if not stat.S_ISREG(status.st_mode):
+            raise ValidationError("models-only transaction lock is not a regular file")
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            if error.errno in (errno.EACCES, errno.EAGAIN):
+                raise ValidationError("another models-only update is already active")
+            raise
+        metadata = _read_lock_metadata(descriptor)
+        return lock_path, descriptor, (status.st_dev, status.st_ino), metadata
+    except Exception:
+        os.close(descriptor)
+        raise
 
 
-def _release_model_routing_lock(lock_path, descriptor, identity):
-    os.close(descriptor)
+def _release_model_routing_lock(lock_path, descriptor, identity, remove):
     try:
-        status = os.lstat(str(lock_path))
-    except FileNotFoundError:
+        if remove:
+            try:
+                status = os.lstat(str(lock_path))
+            except FileNotFoundError:
+                status = None
+            if (
+                status is not None
+                and (status.st_dev, status.st_ino) == identity
+                and stat.S_ISREG(status.st_mode)
+            ):
+                os.unlink(str(lock_path))
+    finally:
+        os.close(descriptor)
+
+
+def _transaction_metadata(codex_home, plan):
+    targets = []
+    for path, content in plan.updates.items():
+        state = plan.states[path]
+        targets.append(
+            {
+                "path": path.relative_to(codex_home).as_posix(),
+                "backup": None,
+                "original_sha256": _sha256(state.content),
+                "desired_sha256": _sha256(content.encode("utf-8")),
+                "mode": state.mode,
+                "parent_identity": list(dict(state.parent_identities)[path.parent]),
+                "installed_identity": None,
+                "displaced": None,
+            }
+        )
+    return {
+        "version": 1,
+        "transaction_id": uuid.uuid4().hex,
+        "owner": {"pid": os.getpid()},
+        "phase": "backups",
+        "targets": targets,
+    }
+
+
+def _journal_path(codex_home, value):
+    if not isinstance(value, str):
+        raise ValidationError("models-only transaction path is malformed")
+    relative = Path(value)
+    if relative.is_absolute() or ".." in relative.parts or len(relative.parts) not in (1, 2):
+        raise ValidationError("models-only transaction path is outside the Codex home")
+    if len(relative.parts) == 2 and relative.parts[0] != "agents":
+        raise ValidationError("models-only transaction path has an unapproved parent")
+    return codex_home / relative
+
+
+def _directory_descriptor_for_path(path, directory_descriptors):
+    try:
+        return directory_descriptors[path.parent]
+    except KeyError:
+        raise ValidationError("models-only transaction target parent is not approved")
+
+
+def _read_state_at(directory_descriptor, path):
+    descriptor = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_descriptor)
+    try:
+        identity_before = _file_identity_from_descriptor(descriptor)
+        content = _read_all(descriptor)
+        identity_after = _file_identity_from_descriptor(descriptor)
+    finally:
+        os.close(descriptor)
+    if identity_after != identity_before:
+        raise ValidationError("managed target changed while recovery read it: {0}".format(path))
+    parent_status = os.fstat(directory_descriptor)
+    parent_identity = (parent_status.st_dev, parent_status.st_ino, parent_status.st_mode)
+    return _ManagedFileState(
+        path=path,
+        content=content,
+        mode=identity_before[2] & 0o777,
+        identity=identity_before,
+        parent_identities=((path.parent, parent_identity),),
+    )
+
+
+def _read_backup_at(directory_descriptor, path):
+    descriptor = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_descriptor)
+    try:
+        identity_before = _file_identity_from_descriptor(descriptor)
+        content = _read_all(descriptor)
+        identity_after = _file_identity_from_descriptor(descriptor)
+    finally:
+        os.close(descriptor)
+    if identity_after != identity_before:
+        raise ValidationError("models-only recovery backup changed while being read")
+    return content
+
+
+def _recover_stale_transaction(codex_home, metadata, directory_descriptors, lock_descriptor):
+    phase = metadata.get("phase")
+    targets = metadata.get("targets")
+    if not isinstance(targets, list):
+        raise ValidationError("models-only transaction target metadata is malformed")
+    if phase == "backups":
+        metadata["phase"] = "recovered"
+        _write_lock_metadata(lock_descriptor, metadata)
         return
-    if (status.st_dev, status.st_ino) == identity and stat.S_ISREG(status.st_mode):
-        os.unlink(str(lock_path))
+    if phase not in ("applying", "committing", "rolling-back", "recovery-required"):
+        raise ValidationError("models-only transaction phase is malformed")
+
+    for entry in reversed(targets):
+        if not isinstance(entry, dict) or not entry.get("backup"):
+            raise ValidationError("models-only transaction lacks a recovery backup")
+        path = _journal_path(codex_home, entry.get("path"))
+        backup_path = _journal_path(codex_home, entry.get("backup"))
+        if backup_path.parent != path.parent:
+            raise ValidationError("models-only recovery backup parent is inconsistent")
+        directory_descriptor = _directory_descriptor_for_path(path, directory_descriptors)
+        parent_status = os.fstat(directory_descriptor)
+        parent_identity = (parent_status.st_dev, parent_status.st_ino, parent_status.st_mode)
+        if list(parent_identity) != entry.get("parent_identity"):
+            raise ValidationError("managed target parent changed before stale-owner recovery")
+        original = _read_backup_at(directory_descriptor, backup_path)
+        if _sha256(original) != entry.get("original_sha256"):
+            raise ValidationError("models-only recovery backup content is invalid")
+        current = _read_state_at(directory_descriptor, path)
+        current_hash = _sha256(current.content)
+        if current_hash == entry.get("original_sha256"):
+            continue
+        if current_hash != entry.get("desired_sha256"):
+            raise ValidationError(
+                "managed target changed outside the stale transaction: {0}".format(path)
+            )
+        replacement = _atomic_replace_bytes_at(
+            directory_descriptor,
+            current,
+            original,
+            mode=entry.get("mode"),
+        )
+        _assert_replacement_current(directory_descriptor, replacement)
+        _commit_replacement_at(directory_descriptor, replacement)
+
+    for entry in targets:
+        path = _journal_path(codex_home, entry.get("path"))
+        directory_descriptor = _directory_descriptor_for_path(path, directory_descriptors)
+        if _sha256(_read_state_at(directory_descriptor, path).content) != entry.get(
+            "original_sha256"
+        ):
+            raise ValidationError("stale-owner recovery could not restore model routing")
+    metadata["phase"] = "recovered"
+    _write_lock_metadata(lock_descriptor, metadata)
 
 
-def apply_model_routing_update(codex_home, full_model, light_model):
+def apply_model_routing_update(codex_home, full_model, light_model, config_path=None):
     """Back up and atomically apply one validated multi-file routing transaction."""
     codex_home = Path(codex_home).resolve()
-    lock_path, lock_descriptor, lock_identity = _acquire_model_routing_lock(codex_home)
+    lock_path, lock_descriptor, lock_identity, stale_metadata = _acquire_model_routing_lock(
+        codex_home
+    )
     directory_descriptors = None
+    preserve_lock = stale_metadata is not None
     try:
         directory_descriptors = _open_model_routing_directories(codex_home)
-        plan = _build_model_routing_plan(codex_home, full_model, light_model)
+        if stale_metadata is not None:
+            _recover_stale_transaction(
+                codex_home,
+                stale_metadata,
+                directory_descriptors,
+                lock_descriptor,
+            )
+            preserve_lock = False
+        plan = _build_model_routing_plan(
+            codex_home,
+            full_model,
+            light_model,
+            config_path=config_path,
+        )
         updates = plan.updates
+        metadata = _transaction_metadata(codex_home, plan)
+        _write_lock_metadata(lock_descriptor, metadata)
+        _fsync_directory(directory_descriptors[codex_home])
         backups = {}
+        entries = {entry["path"]: entry for entry in metadata["targets"]}
         for path in updates:
             state = plan.states[path]
             _assert_managed_file_unchanged(state)
@@ -1020,6 +1448,11 @@ def apply_model_routing_update(codex_home, full_model, light_model):
             )
             backups[path] = _collision_safe_backup_at(directory_descriptor, state)
             _assert_parent_identities(state)
+            entry = entries[path.relative_to(codex_home).as_posix()]
+            entry["backup"] = backups[path].relative_to(codex_home).as_posix()
+            _write_lock_metadata(lock_descriptor, metadata)
+        metadata["phase"] = "applying"
+        _write_lock_metadata(lock_descriptor, metadata)
         replaced = []
         try:
             for path, content in updates.items():
@@ -1028,21 +1461,56 @@ def apply_model_routing_update(codex_home, full_model, light_model):
                 directory_descriptor = _directory_descriptor_for(
                     state, directory_descriptors
                 )
-                _atomic_replace_content_at(directory_descriptor, state, content)
-                replaced.append(path)
+                replacement = _atomic_replace_content_at(
+                    directory_descriptor,
+                    state,
+                    content,
+                )
+                replaced.append(replacement)
                 _assert_parent_identities(state)
+                _assert_replacement_current(directory_descriptor, replacement)
+                entry = entries[path.relative_to(codex_home).as_posix()]
+                entry["installed_identity"] = list(replacement.installed_identity)
+                entry["displaced"] = path.with_name(
+                    replacement.displaced_name
+                ).relative_to(codex_home).as_posix()
+                _write_lock_metadata(lock_descriptor, metadata)
+            metadata["phase"] = "committing"
+            _write_lock_metadata(lock_descriptor, metadata)
+            for replacement in replaced:
+                directory_descriptor = _directory_descriptor_for(
+                    replacement.state,
+                    directory_descriptors,
+                )
+                _commit_replacement_at(directory_descriptor, replacement)
         except Exception as error:
+            metadata["phase"] = "rolling-back"
+            _write_lock_metadata(lock_descriptor, metadata)
             try:
-                for path in reversed(replaced):
-                    state = plan.states[path]
+                for replacement in reversed(replaced):
                     directory_descriptor = _directory_descriptor_for(
-                        state, directory_descriptors
+                        replacement.state,
+                        directory_descriptors,
                     )
-                    _atomic_restore_bytes_at(directory_descriptor, state)
+                    _rollback_replacement_at(directory_descriptor, replacement)
             except Exception as rollback_error:
+                metadata["phase"] = "recovery-required"
+                metadata["recovery_error"] = str(rollback_error)
+                preserve_lock = True
+                _write_lock_metadata(lock_descriptor, metadata)
                 raise OSError(
                     "model routing update failed and rollback was incomplete: {0}".format(
                         rollback_error
+                    )
+                ) from error
+            if isinstance(error, _RecoveryRequiredError):
+                metadata["phase"] = "recovery-required"
+                metadata["recovery_error"] = str(error)
+                preserve_lock = True
+                _write_lock_metadata(lock_descriptor, metadata)
+                raise OSError(
+                    "model routing update stopped with recoverable transaction state: {0}".format(
+                        error
                     )
                 ) from error
             raise
@@ -1050,7 +1518,12 @@ def apply_model_routing_update(codex_home, full_model, light_model):
     finally:
         if directory_descriptors is not None:
             _close_model_routing_directories(directory_descriptors)
-        _release_model_routing_lock(lock_path, lock_descriptor, lock_identity)
+        _release_model_routing_lock(
+            lock_path,
+            lock_descriptor,
+            lock_identity,
+            remove=not preserve_lock,
+        )
 
 
 def _settings_from_arguments(arguments):
@@ -1099,6 +1572,7 @@ def main(argv=None):
             arguments.config.parent,
             arguments.full_model,
             arguments.light_model,
+            config_path=arguments.config,
         )
         if arguments.check:
             print("check: managed model routing is valid; no files were changed")
@@ -1114,6 +1588,7 @@ def main(argv=None):
             arguments.config.parent,
             arguments.full_model,
             arguments.light_model,
+            config_path=arguments.config,
         )
         if backups:
             print("updated managed model routing; backups:")

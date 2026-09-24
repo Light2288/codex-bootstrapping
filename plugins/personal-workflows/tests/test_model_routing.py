@@ -8,6 +8,16 @@ from pathlib import Path
 PLUGIN = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 INTEGRATION_MAP = PLUGIN / "references" / "integration-map.json"
+TASK_METADATA = re.compile(
+    r"^### Task \d+: .+ "
+    r"\[size: (?P<size>S|M|L) \| "
+    r"risk: (?P<risk>none|security|data|concurrency|migrations|other) \| "
+    r"mechanical: (?P<mechanical>true|false) \| "
+    r"clear_pattern: (?P<clear_pattern>true|false) \| "
+    r"objectively_verifiable: (?P<objectively_verifiable>true|false) \| "
+    r"concerns: (?P<concerns>none|[a-z_, -]+)\]$",
+    flags=re.MULTILINE,
+)
 
 
 def task_is_lite_eligible(task, eligibility):
@@ -20,6 +30,7 @@ def task_is_lite_eligible(task, eligibility):
         and task["mechanical"]
         and task["clear_pattern"]
         and task["objectively_verifiable"]
+        and not task["concerns"]
     )
 
 
@@ -48,6 +59,29 @@ def resolve_case(contract, case):
         "tier": selected_tier,
         "implementation_model": implementation_model,
         "limitation": execution.get("limitation"),
+    }
+
+
+def parse_plan_case(path):
+    contents = path.read_text(encoding="utf-8")
+    tier_match = re.search(r"^\*\*Execution tier:\*\* (lite|full)$", contents, re.MULTILINE)
+    tasks = []
+    for match in TASK_METADATA.finditer(contents):
+        task = match.groupdict()
+        for field in ("mechanical", "clear_pattern", "objectively_verifiable"):
+            task[field] = task[field] == "true"
+        task["concerns"] = (
+            []
+            if task["concerns"] == "none"
+            else [item.strip() for item in task["concerns"].split(",")]
+        )
+        tasks.append(task)
+    if tier_match is None or not tasks:
+        raise AssertionError("fixture is not a realistic routed plan artifact")
+    return {
+        "requested_tier": tier_match.group(1),
+        "execution_method": "subagent-driven-development",
+        "tasks": tasks,
     }
 
 
@@ -129,6 +163,36 @@ class ModelRoutingContractTest(unittest.TestCase):
             plan_contract["tier_to_model_role"],
             {"lite": "light", "full": "full"},
         )
+        self.assertEqual(
+            plan_contract["required_task_routing_fields"],
+            [
+                "size",
+                "risk",
+                "mechanical",
+                "clear_pattern",
+                "objectively_verifiable",
+                "concerns",
+            ],
+        )
+
+    def test_realistic_plan_artifact_routes_from_persisted_eligibility_fields(self):
+        """Dropping task eligibility fields from plans makes lite routing inferential."""
+        mapping = self.load_mapping()
+        contract = mapping["model_routing"]
+        case = parse_plan_case(FIXTURES / "eligible-lite-plan.md")
+
+        self.assertEqual(
+            mapping["planning"]["spec-plan"]["required_task_routing_fields"],
+            contract["lite_eligibility"]["required_task_fields"],
+        )
+        self.assertEqual(
+            resolve_case(contract, case),
+            {
+                "tier": "lite",
+                "implementation_model": "gpt-5.6-luna",
+                "limitation": None,
+            },
+        )
 
     def test_skill_documents_apply_the_machine_readable_routing_contract(self):
         mapping = self.load_mapping()
@@ -153,6 +217,10 @@ class ModelRoutingContractTest(unittest.TestCase):
                 self.assertIn(
                     f"`**implementation model role:** {role}`", plan_skill
                 )
+        for field in plan_contract["required_task_routing_fields"]:
+            with self.subTest(task_field=field):
+                self.assertIn(f"{field}:", plan_skill)
+                self.assertIn(f"{field}:", implement_skill)
         for role, model in routing["managed_models"].items():
             with self.subTest(role=role):
                 self.assertIn(f"`{role}` = `{model}`", implement_skill)
@@ -187,15 +255,34 @@ class ModelRoutingContractTest(unittest.TestCase):
 
         self.assertEqual(published, contract["managed_models"])
 
-    def test_final_review_keeps_quality_on_sol_and_spec_on_luna(self):
+    def test_final_review_models_follow_configurable_roles_with_exact_defaults(self):
+        """Pinning reviewer names to literals would discard supported model overrides."""
         contract = self.load_mapping()["model_routing"]
-        expected = {
-            "review-spec": "gpt-5.6-luna",
-            "review-quality": "gpt-5.6-sol",
+        roles = {
+            "review-spec": "light",
+            "review-quality": "full",
         }
 
-        self.assertEqual(contract["final_review_models"], expected)
-        for agent, model in expected.items():
+        self.assertEqual(contract["final_review_model_roles"], roles)
+        defaults = {
+            agent: contract["managed_models"][role] for agent, role in roles.items()
+        }
+        self.assertEqual(
+            defaults,
+            {
+                "review-spec": "gpt-5.6-luna",
+                "review-quality": "gpt-5.6-sol",
+            },
+        )
+        custom_models = {"light": "supported-light", "full": "supported-full"}
+        self.assertEqual(
+            {agent: custom_models[role] for agent, role in roles.items()},
+            {
+                "review-spec": "supported-light",
+                "review-quality": "supported-full",
+            },
+        )
+        for agent, model in defaults.items():
             with self.subTest(agent=agent):
                 profile = tomllib.loads(
                     (PLUGIN / "codex-agents" / f"{agent}.toml").read_text(

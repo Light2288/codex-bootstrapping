@@ -65,6 +65,10 @@ if [[ "$focused_mode" != "complete" && "$mode" != "apply" ]]; then
   print -u2 "focused modes cannot be combined with --check or --dry-run"
   exit 2
 fi
+if [[ "$focused_mode" != "complete" && "$smoke_test" == true ]]; then
+  print -u2 -- "--smoke-test cannot be combined with a focused mode"
+  exit 2
+fi
 
 provider_id="ibm_ica"
 display_name="IBM ICA"
@@ -141,23 +145,12 @@ if [[ "$focused_mode" == "credential" ]]; then
   IFS= read -r -s api_key
   print ""
   [[ -n "$api_key" ]] || { print -u2 "API key cannot be empty"; exit 1; }
-  prior_credential=""
-  if prior_credential=$(run_keychain_helper get --service "$service" --account "codex"); then
-    :
-  else
-    lookup_status=$?
-    if (( lookup_status != 44 )); then
-      unset api_key
-      print -u2 "Could not inspect the existing macOS Keychain credential"
-      exit 1
-    fi
-  fi
   if ! print -rn -- "$api_key" | run_keychain_helper set --service "$service" --account "codex"; then
-    unset api_key prior_credential
+    unset api_key
     print -u2 "Could not store the API key in macOS Keychain"
     exit 1
   fi
-  unset api_key prior_credential
+  unset api_key
   print "Credential updated; no configuration files were changed."
   exit 0
 fi

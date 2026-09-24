@@ -63,8 +63,9 @@ zsh scripts/configure-provider.zsh --credential-only
 ```
 
 This prompts for the provider ID, confirmation, and a hidden credential. It
-uses the same standard-input-to-Keychain helper as the complete flow and does
-not invoke the configuration transformer or change any file.
+uses the same standard-input-to-Keychain helper as the complete flow. The
+transformer validates the provider ID, but credential-only mode skips its
+configuration merge/write path and does not change any configuration file.
 
 Update only managed model routing with:
 
@@ -88,11 +89,20 @@ in `config.toml`, the `full` and `light` values inside the marked
 
 Every target must already exist and carry its expected ownership marker or
 identity. Missing, malformed, symlinked, or unmanaged targets abort before any
-write. Changed files receive collision-safe sibling backups and are replaced
-atomically; a later replacement failure rolls earlier replacements back.
-Unrelated configuration, guidance, agents, and plugin caches are outside this
-mode's write set. The two focused modes cannot be combined, and provider or
-endpoint changes remain exclusive to the complete flow.
+write. `--config` identifies the exact configuration filename; models-only
+mode never silently substitutes a sibling `config.toml`. Changed files receive
+collision-safe sibling backups and are replaced with atomic pathname exchange.
+The transaction records the owner, phase, targets, backups, desired hashes,
+and post-replacement identities durably in
+`.provider-model-routing.lock`. If the owner is terminated, the next run takes
+the released operating-system lock, verifies the journal and backups, restores
+the pre-transaction bytes, and only then starts a fresh update. An unexpected
+external target swap or edit is preserved and recovery stops safely instead of
+overwriting it; do not delete the journal to bypass that refusal. Unrelated
+configuration, guidance, agents, and plugin caches are outside this mode's
+write set. Supported full/light overrides remain valid through profile checks
+and bootstrap reinstalls. The two focused modes cannot be combined, and
+provider or endpoint changes remain exclusive to the complete flow.
 
 ## Safe inspection
 
@@ -106,7 +116,9 @@ zsh scripts/configure-provider.zsh --dry-run
 Both modes avoid credential prompts, Keychain writes, configuration writes, and
 directory creation. Pass `--config /path/to/config.toml` to inspect a different
 target. Add `--smoke-test` during a confirmed normal run to invoke the
-read-only `codex --version` smoke check after configuration.
+read-only `codex --version` smoke check after configuration. Focused modes
+reject `--smoke-test` before prompting or mutation because they do not run the
+complete post-configuration flow.
 
 The lower-level transformer has no API-key option. It can validate or apply
 non-secret settings directly when automation needs it:

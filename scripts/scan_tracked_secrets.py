@@ -13,7 +13,7 @@ from pathlib import Path
 
 LIKELY_CREDENTIAL = re.compile(
     rb"\b(?:sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{36}|"
-    rb"github_pat_[A-Za-z0-9_]{22,}|xox[bp]-[A-Za-z0-9-]{20,})\b"
+    rb"github_pat_[A-Za-z0-9_]{22,}|xox[bp]-[A-Za-z0-9-]{20,})(?!\w)"
 )
 INTENTIONAL_FIXTURES = {
     "tests/test_distribution.py": frozenset(

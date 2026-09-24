@@ -192,6 +192,41 @@ class PublicDistributionTest(unittest.TestCase):
             self.assertIn("docs/leak.md:1", output)
             self.assertNotIn(leak, output)
 
+    def test_tracked_secret_scan_detects_trailing_hyphen_at_eof_and_newline(self):
+        """A detector-valid credential may end in a hyphen before EOF or newline."""
+        token = "sk-" + "a" * 19 + "-"
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            (repository / "eof.txt").write_text(token, encoding="utf-8")
+            (repository / "newline.txt").write_text(token + "\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(repository)], check=True)
+            subprocess.run(["git", "-C", str(repository), "add", "eof.txt", "newline.txt"], check=True)
+
+            result = self.run_secret_scanner(repository)
+
+            output = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 1, output)
+            self.assertIn("eof.txt:1", output)
+            self.assertIn("newline.txt:1", output)
+            self.assertNotIn(token, output)
+
+    def test_tracked_secret_scan_detects_trailing_hyphen_before_punctuation(self):
+        """A trailing-hyphen credential remains detectable beside punctuation."""
+        token = "sk-" + "a" * 19 + "-"
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            (repository / "punctuation.txt").write_text(token + ",\n" + token + ".\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(repository)], check=True)
+            subprocess.run(["git", "-C", str(repository), "add", "punctuation.txt"], check=True)
+
+            result = self.run_secret_scanner(repository)
+
+            output = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 1, output)
+            self.assertIn("punctuation.txt:1", output)
+            self.assertIn("punctuation.txt:2", output)
+            self.assertNotIn(token, output)
+
     def test_tracked_secret_scan_allowlists_only_exact_detector_fixtures(self):
         """A broad test-file exception would hide a real credential beside detector fixtures."""
         with tempfile.TemporaryDirectory() as directory:

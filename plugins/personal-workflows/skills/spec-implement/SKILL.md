@@ -48,13 +48,32 @@ and decisive proof line for the final review package; label evidence that was
 not observed as `unobserved`.
 
 Interpret each task's `[S|M|L | risk: ...]` metadata without inferring missing
-values. Prefer the plan's `lite` routing only when every task is S or M,
-`risk: none`, mechanical, grounded in an existing pattern, and objectively
-verifiable. Otherwise use the capable route selected by the execution base.
-Missing or invalid metadata disables lite routing and is recorded as a
-conservative escalation. L tasks and any non-`none` risk also disable lite.
-Model routing stays inside the selected execution base; do not install or
-simulate legacy implementer agents.
+values. Resolve the requested tier from an explicit current entry-point or
+user request first, then from the plan's `Execution tier`; a request for
+`lite` is not an eligibility override. Use `lite` only when every task is S or
+M, `risk: none`, mechanical, grounded in an existing pattern, and objectively
+verifiable. Missing or invalid metadata, an L task, any non-`none` risk,
+ambiguous or borderline work, and security, auth, data, migration,
+concurrency, or performance concerns select or escalate to `full`. Record the
+selected tier and every conservative escalation.
+
+Resolve the exact model from the active personal-workflows managed model
+routing block. Its default role mapping is `light` = `gpt-5.6-luna` and
+`full` = `gpt-5.6-sol`, as recorded in the integration map. For
+subagent-driven implementation, every eligible `lite` implementer dispatch
+must explicitly set the resolved `light` model; every `full` dispatch and
+every escalated or replacement implementer dispatch must explicitly set the
+resolved `full` model. With the shipped managed values, those exact dispatch
+models are `gpt-5.6-luna` and `gpt-5.6-sol`, respectively. Also pass the
+reasoning effort selected under the base's Model Selection rules explicitly.
+Never omit either override and never claim a different exact model was
+selected.
+
+Inline execution cannot switch the current parent model. Before inline work,
+report the selected tier and that no model switch occurred; do not claim model
+savings or that the parent is running the managed tier model. Continue with
+the selected inline base unchanged. Do not install or simulate legacy
+implementer agents.
 
 ## Personal final-review postcondition
 
@@ -65,6 +84,11 @@ as the sole final whole-branch review seat. It substitutes for that base's
 generic final reviewer: never dispatch a generic final reviewer before,
 during, or after it. Its two stages and any permitted targeted follow-up remain
 one seat and inherit the enclosing base's fix-loop limit.
+
+The review route is independent of the implementation tier: `review-spec`
+performs specification adherence on `gpt-5.6-luna`, then `review-quality`
+owns the final code-quality, security, and production-risk judgment on
+`gpt-5.6-sol`. Never route that second-stage judgment to the light model.
 
 Only after that gate is passed or its findings are handled under the enclosing
 base policy may branch finishing begin. `code-review` is this wrapper's

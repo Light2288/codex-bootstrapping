@@ -1,0 +1,6 @@
+interface:
+  display_name: "Implement Lite"
+  short_description: "Request eligible plans use the light model"
+  default_prompt: "Use $implement-lite to implement this approved specification and plan through the eligible light route."
+policy:
+  allow_implicit_invocation: true

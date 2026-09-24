@@ -6,6 +6,64 @@
     "code-review": ["requesting-code-review", "receiving-code-review"],
     "debug": ["systematic-debugging"]
   },
+  "entry_points": {
+    "implement-lite": {
+      "delegate": "spec-implement",
+      "load": "exactly-once",
+      "requested_tier": "lite"
+    }
+  },
+  "planning": {
+    "spec-plan": {
+      "required_routing_metadata": [
+        "execution_tier",
+        "implementation_model_role"
+      ],
+      "tier_to_model_role": {
+        "lite": "light",
+        "full": "full"
+      }
+    }
+  },
+  "model_routing": {
+    "managed_models": {
+      "full": "gpt-5.6-sol",
+      "light": "gpt-5.6-luna"
+    },
+    "tiers": {
+      "lite": {
+        "implementation_model_role": "light"
+      },
+      "full": {
+        "implementation_model_role": "full"
+      }
+    },
+    "lite_eligibility": {
+      "required_task_fields": [
+        "size",
+        "risk",
+        "mechanical",
+        "clear_pattern",
+        "objectively_verifiable"
+      ],
+      "allowed_sizes": ["S", "M"],
+      "required_risk": "none"
+    },
+    "escalation_tier": "full",
+    "execution_methods": {
+      "subagent-driven-development": {
+        "can_override_parent_model": true
+      },
+      "executing-plans": {
+        "can_override_parent_model": false,
+        "limitation": "cannot-switch-parent-model"
+      }
+    },
+    "final_review_models": {
+      "review-spec": "gpt-5.6-luna",
+      "review-quality": "gpt-5.6-sol"
+    }
+  },
   "execution_routes": {
     "spec-implement": {
       "selection": {

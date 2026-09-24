@@ -26,6 +26,7 @@ EXPECTED_SKILLS = {
     "doc-estimate",
     "doc-ingest",
     "doc-summarize",
+    "implement-lite",
     "repository-audit",
     "spec-define",
     "spec-implement",

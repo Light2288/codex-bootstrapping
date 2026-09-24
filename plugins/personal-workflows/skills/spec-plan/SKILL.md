@@ -36,17 +36,25 @@ the Superpowers location and record `Slug` and `Provenance` metadata.
 ## Personal planning delta
 
 Keep every field in the Superpowers plan header and its checkbox task format.
-Add an execution-tier recommendation and append this metadata to every task
+Add an execution-tier selection and append this metadata to every task
 heading:
 
 `[<S|M|L> | risk: <none|security|data|concurrency|migrations|other>]`
 
 Size is delivery effort; risk is the one material review domain. Explain any
 non-`none` risk and split tasks that combine materially different risk
-domains. Recommend `lite` only when every task is S or M, every risk is
+domains. Select `lite` only when every task is S or M, every risk is
 `none`, the work is mechanical, existing patterns are clear, and verification
-is objective. Otherwise recommend `full`; borderline work is `full`. This
-recommendation does not replace the base execution-method handoff.
+is objective. Otherwise select `full`; borderline work is `full`.
+
+Record the selection once in the plan header, using these exact fields:
+
+- `**Execution tier:** lite` and `**Implementation model role:** light`; or
+- `**Execution tier:** full` and `**Implementation model role:** full`.
+
+The model role is a managed lookup key, not a model name. The implementation
+workflow resolves its current exact model. This selection does not replace the
+base execution-method handoff.
 
 Maintain criterion traceability:
 

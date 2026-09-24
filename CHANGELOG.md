@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Add deterministic full/light implementation model routing and the thin
+  `$implement-lite` entry point while preserving the integrated Sol quality
+  review gate.
+
 All notable changes to this project are documented in this file.
 
 ## 1.0.0 - 2026-09-23

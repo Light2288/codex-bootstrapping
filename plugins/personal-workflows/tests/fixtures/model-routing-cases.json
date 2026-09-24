@@ -1,0 +1,98 @@
+[
+  {
+    "name": "eligible lite subagent implementation",
+    "requested_tier": "lite",
+    "execution_method": "subagent-driven-development",
+    "tasks": [
+      {
+        "size": "S",
+        "risk": "none",
+        "mechanical": true,
+        "clear_pattern": true,
+        "objectively_verifiable": true
+      }
+    ],
+    "expected_tier": "lite",
+    "expected_implementation_model": "gpt-5.6-luna"
+  },
+  {
+    "name": "full subagent implementation",
+    "requested_tier": "full",
+    "execution_method": "subagent-driven-development",
+    "tasks": [
+      {
+        "size": "S",
+        "risk": "none",
+        "mechanical": true,
+        "clear_pattern": true,
+        "objectively_verifiable": true
+      }
+    ],
+    "expected_tier": "full",
+    "expected_implementation_model": "gpt-5.6-sol"
+  },
+  {
+    "name": "lite escalates for a large task",
+    "requested_tier": "lite",
+    "execution_method": "subagent-driven-development",
+    "tasks": [
+      {
+        "size": "L",
+        "risk": "none",
+        "mechanical": true,
+        "clear_pattern": true,
+        "objectively_verifiable": true
+      }
+    ],
+    "expected_tier": "full",
+    "expected_implementation_model": "gpt-5.6-sol"
+  },
+  {
+    "name": "lite escalates for security work",
+    "requested_tier": "lite",
+    "execution_method": "subagent-driven-development",
+    "tasks": [
+      {
+        "size": "S",
+        "risk": "security",
+        "mechanical": true,
+        "clear_pattern": true,
+        "objectively_verifiable": true
+      }
+    ],
+    "expected_tier": "full",
+    "expected_implementation_model": "gpt-5.6-sol"
+  },
+  {
+    "name": "lite escalates when metadata is missing",
+    "requested_tier": "lite",
+    "execution_method": "subagent-driven-development",
+    "tasks": [
+      {
+        "size": "S",
+        "risk": "none",
+        "mechanical": true,
+        "clear_pattern": true
+      }
+    ],
+    "expected_tier": "full",
+    "expected_implementation_model": "gpt-5.6-sol"
+  },
+  {
+    "name": "inline lite cannot switch the parent model",
+    "requested_tier": "lite",
+    "execution_method": "executing-plans",
+    "tasks": [
+      {
+        "size": "S",
+        "risk": "none",
+        "mechanical": true,
+        "clear_pattern": true,
+        "objectively_verifiable": true
+      }
+    ],
+    "expected_tier": "lite",
+    "expected_implementation_model": null,
+    "expected_limitation": "cannot-switch-parent-model"
+  }
+]

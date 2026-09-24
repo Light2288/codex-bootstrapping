@@ -87,16 +87,23 @@ class PluginContractTest(unittest.TestCase):
 
     def test_integration_map_covers_every_migrated_skill(self):
         mapping = json.loads((PLUGIN / "references/integration-map.json").read_text())
-        actual = set(mapping["wrappers"]) | set(mapping["standalone"])
+        actual = (
+            set(mapping["wrappers"])
+            | set(mapping["entry_points"])
+            | set(mapping["standalone"])
+        )
         expected = {
-            "spec-define", "spec-plan", "spec-implement", "code-review", "debug",
+            "spec-define", "spec-plan", "spec-implement", "implement-lite",
+            "code-review", "debug",
             "arch-map", "arch-compare", "arch-design", "doc-ingest",
             "doc-analyze", "doc-estimate", "doc-summarize", "repository-audit",
         }
         self.assertEqual(actual, expected)
 
     def test_migrated_wrappers_include_skill_and_ui_metadata(self):
-        for skill_name in ("spec-define", "spec-plan", "spec-implement", "debug"):
+        for skill_name in (
+            "spec-define", "spec-plan", "spec-implement", "implement-lite", "debug"
+        ):
             with self.subTest(skill=skill_name):
                 skill = PLUGIN / "skills" / skill_name
                 self.assertTrue((skill / "SKILL.md").is_file())

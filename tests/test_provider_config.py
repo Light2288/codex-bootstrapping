@@ -1,6 +1,7 @@
 """Behavioral tests for the safe custom-provider TOML transformer."""
 
 import importlib.util
+import builtins
 import hashlib
 import os
 import subprocess
@@ -845,7 +846,7 @@ class ProviderConfigTest(unittest.TestCase):
 
             self.assertTrue(broken_backup.is_symlink())
             self.assertFalse(outside_target.exists())
-            self.assertEqual(backups[codex_home / "config.toml"].name, "config.toml.backup.2")
+            self.assertIn("config.toml.backup.2", {backup.name for backup in backups.values()})
             self.assertTrue((codex_home / "config.toml.backup.2").is_file())
 
     def test_models_only_refuses_an_agent_directory_symlink_outside_codex_home(self):
@@ -868,6 +869,73 @@ class ProviderConfigTest(unittest.TestCase):
 
             self.assertEqual(self.tree_contents(outside_agents), outside_before)
             self.assertFalse(list(outside_agents.rglob("*.backup.*")))
+
+    def test_models_only_requires_tomllib_before_rewriting_unrelated_malformed_syntax(self):
+        """Without a full parser, malformed unrelated TOML must not be rewritten."""
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = self.create_managed_codex_home(Path(directory))
+            config = codex_home / "config.toml"
+            config.write_text(
+                config.read_text(encoding="utf-8") + "broken =\n",
+                encoding="utf-8",
+            )
+            before = self.tree_contents(codex_home)
+            real_import = builtins.__import__
+
+            def import_without_tomllib(name, *args, **kwargs):
+                if name == "tomllib":
+                    raise ImportError("simulated missing tomllib")
+                return real_import(name, *args, **kwargs)
+
+            with patch("builtins.__import__", side_effect=import_without_tomllib):
+                with self.assertRaisesRegex(ValidationError, "Python 3.11"):
+                    provider_config.apply_model_routing_update(
+                        codex_home,
+                        "gpt-5.6-sol",
+                        "gpt-5.6-luna",
+                    )
+
+            self.assertEqual(self.tree_contents(codex_home), before)
+            self.assertFalse(list(codex_home.rglob("*.backup.*")))
+
+    def test_models_only_rolls_back_when_parent_identity_changes_after_planning(self):
+        """A post-validation directory swap must not redirect replacements outside the home."""
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            codex_home = self.create_managed_codex_home(temporary)
+            config_before = (codex_home / "config.toml").read_bytes()
+            guidance_before = (codex_home / "AGENTS.md").read_bytes()
+            agents = codex_home / "agents"
+            outside_agents = temporary / "outside-agents"
+            outside_before = self.tree_contents(agents)
+            real_replace_content = provider_config._atomic_replace_content
+            replacements = {"count": 0}
+
+            def replace_then_swap(destination, content):
+                result = real_replace_content(destination, content)
+                replacements["count"] += 1
+                if replacements["count"] == 1:
+                    agents.rename(outside_agents)
+                    agents.symlink_to(outside_agents, target_is_directory=True)
+                return result
+
+            with patch.object(
+                provider_config,
+                "_atomic_replace_content",
+                side_effect=replace_then_swap,
+            ):
+                with self.assertRaisesRegex(ValidationError, "changed"):
+                    provider_config.apply_model_routing_update(
+                        codex_home,
+                        "gpt-5.6-sol",
+                        "gpt-5.6-luna",
+                    )
+
+            self.assertEqual((codex_home / "config.toml").read_bytes(), config_before)
+            self.assertEqual((codex_home / "AGENTS.md").read_bytes(), guidance_before)
+            outside_after = self.tree_contents(outside_agents)
+            for relative, contents in outside_before.items():
+                self.assertEqual(outside_after[relative], contents, relative)
 
 
 if __name__ == "__main__":

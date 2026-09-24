@@ -94,6 +94,19 @@ run_keychain_helper() {
   fi
 }
 
+find_python_311() {
+  local candidate candidate_path
+  for candidate in python3.13 python3.12 python3.11 python3; do
+    (( $+commands[$candidate] )) || continue
+    candidate_path="$(whence -p "$candidate")"
+    if "$candidate_path" -c 'import sys; raise SystemExit(sys.version_info < (3, 11))' 2>/dev/null; then
+      print -r -- "$candidate_path"
+      return 0
+    fi
+  done
+  return 1
+}
+
 transformer_args=(
   --config "$config_path"
   --provider-id "$provider_id"
@@ -150,6 +163,10 @@ if [[ "$focused_mode" == "credential" ]]; then
 fi
 
 if [[ "$focused_mode" == "models" ]]; then
+  models_python="$(find_python_311)" || {
+    print -u2 "Models-only updates require Python 3.11 or newer for full TOML validation."
+    exit 1
+  }
   prompt_default "Full model" "$model"; model="$REPLY"
   prompt_default "Light model" "$light_model"; light_model="$REPLY"
   model_args=(
@@ -159,13 +176,13 @@ if [[ "$focused_mode" == "models" ]]; then
     --light-model "$light_model"
   )
   print ""
-  python3 "$transformer" "${model_args[@]}" --dry-run
+  "$models_python" "$transformer" "${model_args[@]}" --dry-run
   print ""
   print "Only the top-level default model and ownership-marked personal-workflows routing files will change."
   printf 'Apply these model assignments? [y/N]: '
   IFS= read -r confirmation
   [[ "$confirmation" == "y" || "$confirmation" == "Y" ]] || { print "No changes made."; exit 0; }
-  python3 "$transformer" "${model_args[@]}"
+  "$models_python" "$transformer" "${model_args[@]}"
   exit 0
 fi
 

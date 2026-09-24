@@ -13,6 +13,7 @@ import datetime
 import os
 import re
 import shutil
+import stat
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -79,6 +80,21 @@ class _LexedLine:
     text: str
     is_structural: bool
     multiline_after: Optional[str]
+
+
+@dataclass(frozen=True)
+class _ManagedFileState:
+    path: Path
+    content: bytes
+    mode: int
+    identity: tuple
+    parent_identities: tuple
+
+
+@dataclass(frozen=True)
+class _ModelRoutingPlan:
+    updates: dict
+    states: dict
 
 
 def _require_safe_text(name, value):
@@ -433,6 +449,18 @@ def _validate_toml_if_available(content):
         raise ValidationError("configuration is not valid TOML: {0}".format(error))
 
 
+def _validate_toml_required(content):
+    """Parse TOML for models-only updates or refuse to plan any write."""
+    try:
+        import tomllib  # Python 3.11+
+    except ImportError:
+        raise ValidationError("models-only updates require Python 3.11 or newer")
+    try:
+        tomllib.loads(content)
+    except Exception as error:
+        raise ValidationError("managed target is not valid TOML: {0}".format(error))
+
+
 def merge_config(existing, settings):
     """Merge managed settings while retaining all unrelated text verbatim."""
     validate_settings(settings)
@@ -566,6 +594,80 @@ def _owned_regular_file(path, label, codex_home):
         raise ValidationError("refusing {0} outside the Codex home: {1}".format(label, path))
 
 
+def _directory_identity(path):
+    status = os.lstat(str(path))
+    if not stat.S_ISDIR(status.st_mode) or stat.S_ISLNK(status.st_mode):
+        raise ValidationError("managed target parent is not a real directory: {0}".format(path))
+    return (status.st_dev, status.st_ino, status.st_mode)
+
+
+def _file_identity(path):
+    status = os.lstat(str(path))
+    if not stat.S_ISREG(status.st_mode) or stat.S_ISLNK(status.st_mode):
+        raise ValidationError("managed target is not a regular file: {0}".format(path))
+    return (
+        status.st_dev,
+        status.st_ino,
+        status.st_mode,
+        status.st_size,
+        status.st_mtime_ns,
+        status.st_ctime_ns,
+    )
+
+
+def _parent_identities(path, codex_home):
+    codex_home = Path(codex_home).resolve()
+    try:
+        relative_parent = path.parent.relative_to(codex_home)
+    except ValueError:
+        raise ValidationError("refusing managed target outside the Codex home: {0}".format(path))
+    current = codex_home
+    identities = [(current, _directory_identity(current))]
+    for part in relative_parent.parts:
+        current = current / part
+        identities.append((current, _directory_identity(current)))
+    return tuple(identities)
+
+
+def _read_stable_managed_file(path, label, codex_home):
+    _owned_regular_file(path, label, codex_home)
+    parents_before = _parent_identities(path, codex_home)
+    identity_before = _file_identity(path)
+    content = path.read_bytes()
+    parents_after = _parent_identities(path, codex_home)
+    identity_after = _file_identity(path)
+    if parents_after != parents_before or identity_after != identity_before:
+        raise ValidationError("managed target changed while it was being read: {0}".format(path))
+    return _ManagedFileState(
+        path=path,
+        content=content,
+        mode=identity_before[2] & 0o777,
+        identity=identity_before,
+        parent_identities=parents_before,
+    )
+
+
+def _assert_parent_identities(state):
+    try:
+        current = tuple(
+            (path, _directory_identity(path)) for path, _identity in state.parent_identities
+        )
+    except (OSError, ValidationError):
+        raise ValidationError("managed target parent changed during update: {0}".format(state.path))
+    if current != state.parent_identities:
+        raise ValidationError("managed target parent changed during update: {0}".format(state.path))
+
+
+def _assert_managed_file_unchanged(state):
+    _assert_parent_identities(state)
+    try:
+        current = _file_identity(state.path)
+    except (OSError, ValidationError):
+        raise ValidationError("managed target changed during update: {0}".format(state.path))
+    if current != state.identity:
+        raise ValidationError("managed target changed during update: {0}".format(state.path))
+
+
 def _replace_single_root_assignment(existing, key, value, label):
     lines = existing.splitlines(keepends=True)
     lexed_lines = _lex_toml_lines(lines)
@@ -647,20 +749,24 @@ def _validate_agent_identity(existing, expected_name, path):
     _validate_toml_if_available(existing)
 
 
-def plan_model_routing_update(codex_home, full_model, light_model):
-    """Validate and render the complete ownership-bounded routing update."""
-    codex_home = Path(codex_home)
+def _build_model_routing_plan(codex_home, full_model, light_model):
+    """Read, validate, and snapshot the complete ownership-bounded update."""
+    codex_home = Path(codex_home).resolve()
     full_model = _validate_model_name("full", full_model)
     light_model = _validate_model_name("light", light_model)
     config_path = codex_home / "config.toml"
     guidance_path = codex_home / "AGENTS.md"
-    _owned_regular_file(config_path, "config", codex_home)
-    _owned_regular_file(guidance_path, "guidance", codex_home)
-
-    originals = {
-        config_path: config_path.read_text(encoding="utf-8"),
-        guidance_path: guidance_path.read_text(encoding="utf-8"),
+    states = {
+        config_path: _read_stable_managed_file(config_path, "config", codex_home),
+        guidance_path: _read_stable_managed_file(guidance_path, "guidance", codex_home),
     }
+    try:
+        originals = {
+            path: state.content.decode("utf-8") for path, state in states.items()
+        }
+    except UnicodeDecodeError as error:
+        raise ValidationError("managed target is not UTF-8 text: {0}".format(error))
+    _validate_toml_required(originals[config_path])
     rendered = {
         config_path: _replace_single_root_assignment(
             originals[config_path], "model", full_model, "config"
@@ -671,17 +777,31 @@ def plan_model_routing_update(codex_home, full_model, light_model):
     }
     for filename, role in sorted(_MANAGED_AGENT_MODELS.items()):
         path = codex_home / "agents" / filename
-        _owned_regular_file(path, "agent", codex_home)
-        existing = path.read_text(encoding="utf-8")
+        state = _read_stable_managed_file(path, "agent", codex_home)
+        states[path] = state
+        try:
+            existing = state.content.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise ValidationError("managed agent is not UTF-8 text: {0}".format(error))
+        _validate_toml_required(existing)
         _validate_agent_identity(existing, filename[:-5], path)
         model = full_model if role == "full" else light_model
         originals[path] = existing
         rendered[path] = _replace_single_root_assignment(existing, "model", model, "agent")
-    return {
+    updates = {
         path: contents
         for path, contents in rendered.items()
         if contents != originals[path]
     }
+    for path, contents in updates.items():
+        if path.suffix == ".toml":
+            _validate_toml_required(contents)
+    return _ModelRoutingPlan(updates=updates, states=states)
+
+
+def plan_model_routing_update(codex_home, full_model, light_model):
+    """Validate and render the complete ownership-bounded routing update."""
+    return _build_model_routing_plan(codex_home, full_model, light_model).updates
 
 
 def _collision_safe_backup(destination):
@@ -732,31 +852,65 @@ def _atomic_restore_bytes(destination, content, mode):
         raise
 
 
+def _acquire_model_routing_lock(codex_home):
+    lock_path = Path(codex_home).resolve() / ".provider-model-routing.lock"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(str(lock_path), flags, 0o600)
+    except FileExistsError:
+        raise ValidationError("another models-only update is already active")
+    status = os.fstat(descriptor)
+    return lock_path, descriptor, (status.st_dev, status.st_ino)
+
+
+def _release_model_routing_lock(lock_path, descriptor, identity):
+    os.close(descriptor)
+    try:
+        status = os.lstat(str(lock_path))
+    except FileNotFoundError:
+        return
+    if (status.st_dev, status.st_ino) == identity and stat.S_ISREG(status.st_mode):
+        os.unlink(str(lock_path))
+
+
 def apply_model_routing_update(codex_home, full_model, light_model):
     """Back up and atomically apply one validated multi-file routing transaction."""
-    updates = plan_model_routing_update(codex_home, full_model, light_model)
-    originals = {
-        path: (path.read_bytes(), path.stat().st_mode & 0o777) for path in updates
-    }
-    backups = {path: _collision_safe_backup(path) for path in updates}
-    replaced = []
+    codex_home = Path(codex_home).resolve()
+    lock_path, lock_descriptor, lock_identity = _acquire_model_routing_lock(codex_home)
     try:
-        for path, content in updates.items():
-            _atomic_replace_content(path, content)
-            replaced.append(path)
-    except Exception as error:
+        plan = _build_model_routing_plan(codex_home, full_model, light_model)
+        updates = plan.updates
+        originals = {
+            path: (plan.states[path].content, plan.states[path].mode) for path in updates
+        }
+        backups = {}
+        for path in updates:
+            _assert_managed_file_unchanged(plan.states[path])
+            backups[path] = _collision_safe_backup(path)
+        replaced = []
         try:
-            for path in reversed(replaced):
-                content, mode = originals[path]
-                _atomic_restore_bytes(path, content, mode)
-        except Exception as rollback_error:
-            raise OSError(
-                "model routing update failed and rollback was incomplete: {0}".format(
-                    rollback_error
-                )
-            ) from error
-        raise
-    return backups
+            for path, content in updates.items():
+                _assert_managed_file_unchanged(plan.states[path])
+                _atomic_replace_content(path, content)
+                replaced.append(path)
+        except Exception as error:
+            try:
+                for path in reversed(replaced):
+                    _assert_parent_identities(plan.states[path])
+                    content, mode = originals[path]
+                    _atomic_restore_bytes(path, content, mode)
+            except Exception as rollback_error:
+                raise OSError(
+                    "model routing update failed and rollback was incomplete: {0}".format(
+                        rollback_error
+                    )
+                ) from error
+            raise
+        return backups
+    finally:
+        _release_model_routing_lock(lock_path, lock_descriptor, lock_identity)
 
 
 def _settings_from_arguments(arguments):

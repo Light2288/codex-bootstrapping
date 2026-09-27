@@ -11,7 +11,7 @@ codex_home="${CODEX_HOME:-$HOME/.codex}"
 mode="install"
 official_install_url="https://developers.openai.com/codex/"
 official_installer_url="https://chatgpt.com/codex/install.sh"
-bundled_codex="${CODEX_BOOTSTRAP_BUNDLED_CODEX:-/Applications/ChatGPT.app/Contents/Resources/codex}"
+bundled_codex="${CODEX_BOOTSTRAP_BUNDLED_CODEX:-/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex}"
 
 usage() {
   print "Usage: ${0:t} [--codex-home PATH] [--check | --dry-run]"

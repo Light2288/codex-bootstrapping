@@ -21,7 +21,7 @@ values when Enter is pressed:
 | Provider ID | `ibm_ica` |
 | Display name | `IBM ICA` |
 | API base URL | `https://api.servicesessentials.ibm.com/v1` |
-| Model | `gpt-5.6-sol` |
+| Model | `gpt-6.1-sol` |
 | Reasoning effort | `high` |
 | Wire API | `responses` |
 | Credential environment variable | `IBM_ICA_CODEX_API_KEY` |
@@ -77,7 +77,7 @@ Models-only mode selects Python 3.11 or newer so every TOML target is fully
 parsed before any backup or write; it exits without changes if no suitable
 interpreter is available.
 
-The full and light prompts default to `gpt-5.6-sol` and `gpt-5.6-luna`.
+The full and light prompts default to `gpt-6.1-sol` and `gpt-6-luna`.
 After preview and confirmation, the transaction updates the top-level `model`
 in `config.toml`, the `full` and `light` values inside the marked
 `personal-workflows` block in `AGENTS.md`, and these owned agent assignments:

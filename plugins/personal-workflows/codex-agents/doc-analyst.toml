@@ -1,7 +1,7 @@
 # Managed by personal-workflows
 name = "doc-analyst"
 description = "Restricted local evidence analyst for requirements, contradictions, gaps, and ADR conflicts."
-model = "gpt-5.6-sol"
+model = "gpt-6.1-sol"
 model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 developer_instructions = """

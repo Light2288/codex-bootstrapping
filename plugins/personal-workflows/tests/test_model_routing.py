@@ -189,7 +189,7 @@ class ModelRoutingContractTest(unittest.TestCase):
             resolve_case(contract, case),
             {
                 "tier": "lite",
-                "implementation_model": "gpt-5.6-luna",
+                "implementation_model": "gpt-6-luna",
                 "limitation": None,
             },
         )
@@ -270,8 +270,8 @@ class ModelRoutingContractTest(unittest.TestCase):
         self.assertEqual(
             defaults,
             {
-                "review-spec": "gpt-5.6-luna",
-                "review-quality": "gpt-5.6-sol",
+                "review-spec": "gpt-6-luna",
+                "review-quality": "gpt-6.1-sol",
             },
         )
         custom_models = {"light": "supported-light", "full": "supported-full"}

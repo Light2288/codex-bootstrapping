@@ -37,11 +37,11 @@ class ProviderConfigTest(unittest.TestCase):
     """The tests name configuration errors that must be caught before writes."""
 
     managed_agent_models = {
-        "doc-analyst.toml": "gpt-5.6-sol",
-        "document-worker.toml": "gpt-5.6-sol",
-        "review-audit.toml": "gpt-5.6-sol",
-        "review-quality.toml": "gpt-5.6-sol",
-        "review-spec.toml": "gpt-5.6-luna",
+        "doc-analyst.toml": "gpt-6.1-sol",
+        "document-worker.toml": "gpt-6.1-sol",
+        "review-audit.toml": "gpt-6.1-sol",
+        "review-quality.toml": "gpt-6.1-sol",
+        "review-spec.toml": "gpt-6-luna",
     }
 
     def create_managed_codex_home(self, root):
@@ -96,7 +96,7 @@ class ProviderConfigTest(unittest.TestCase):
 
         self.assertEqual(
             rendered,
-            'model = "gpt-5.6-sol"\n'
+            'model = "gpt-6.1-sol"\n'
             'model_reasoning_effort = "high"\n'
             'model_provider = "ibm_ica"\n'
             "\n"
@@ -129,7 +129,7 @@ class ProviderConfigTest(unittest.TestCase):
         self.assertIn("# Keep this comment\n", rendered)
         self.assertIn('approval_policy = "on-request"\n', rendered)
         self.assertIn("[mcp_servers.keep]\ncommand = \"keep-me\"\n", rendered)
-        self.assertIn('model = "gpt-5.6-sol" # selected model\n', rendered)
+        self.assertIn('model = "gpt-6.1-sol" # selected model\n', rendered)
         self.assertEqual(rendered.count("[model_providers.ibm_ica]"), 1)
 
     def test_merge_preserves_root_and_table_lookalikes_in_multiline_basic_strings(self):
@@ -147,7 +147,7 @@ class ProviderConfigTest(unittest.TestCase):
         rendered = merge_config(existing, DEFAULT_SETTINGS)
 
         self.assertIn(multiline_value, rendered)
-        self.assertIn('model = "gpt-5.6-sol"\n', rendered)
+        self.assertIn('model = "gpt-6.1-sol"\n', rendered)
         self.assertIn('[mcp_servers.keep]\ncommand = "keep"\n', rendered)
         self.assertEqual(rendered.count("[model_providers.ibm_ica]"), 2)
 
@@ -178,7 +178,7 @@ class ProviderConfigTest(unittest.TestCase):
 
         rendered = merge_config(existing, DEFAULT_SETTINGS)
 
-        self.assertIn('"model" = "gpt-5.6-sol"\n', rendered)
+        self.assertIn('"model" = "gpt-6.1-sol"\n', rendered)
         self.assertIn("'model_reasoning_effort' = \"high\"\n", rendered)
         self.assertIn('"model_provider" = "ibm_ica"\n', rendered)
         self.assertNotIn('\nmodel = ', rendered)
@@ -378,9 +378,9 @@ class ProviderConfigTest(unittest.TestCase):
             target = Path(directory) / "config.toml"
             target.write_text("old = true\n", encoding="utf-8")
 
-            backup = atomic_write_config(target, 'model = "gpt-5.6-sol"\n')
+            backup = atomic_write_config(target, 'model = "gpt-6.1-sol"\n')
 
-            self.assertEqual(target.read_text(encoding="utf-8"), 'model = "gpt-5.6-sol"\n')
+            self.assertEqual(target.read_text(encoding="utf-8"), 'model = "gpt-6.1-sol"\n')
             self.assertIsNotNone(backup)
             self.assertEqual(backup.read_text(encoding="utf-8"), "old = true\n")
 
@@ -708,13 +708,13 @@ class ProviderConfigTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, (result.stdout, result.stderr))
             self.assertFalse(helper_log.exists())
             config = (codex_home / "config.toml").read_text(encoding="utf-8")
-            self.assertIn('model = "gpt-5.6-sol"\n', config)
+            self.assertIn('model = "gpt-6.1-sol"\n', config)
             self.assertIn('base_url = "https://provider.example/v1"\n', config)
             guidance = (codex_home / "AGENTS.md").read_text(encoding="utf-8")
             self.assertIn("unmanaged prefix\n", guidance)
             self.assertIn("unmanaged suffix\n", guidance)
-            self.assertIn("- `full`: `gpt-5.6-sol`\n", guidance)
-            self.assertIn("- `light`: `gpt-5.6-luna`\n", guidance)
+            self.assertIn("- `full`: `gpt-6.1-sol`\n", guidance)
+            self.assertIn("- `light`: `gpt-6-luna`\n", guidance)
             for filename, expected_model in self.managed_agent_models.items():
                 with self.subTest(filename=filename):
                     contents = (codex_home / "agents" / filename).read_text(encoding="utf-8")
@@ -989,8 +989,8 @@ class ProviderConfigTest(unittest.TestCase):
                 with self.assertRaises(OSError):
                     provider_config.apply_model_routing_update(
                         codex_home,
-                        "gpt-5.6-sol",
-                        "gpt-5.6-luna",
+                        "gpt-6.1-sol",
+                        "gpt-6-luna",
                     )
 
             after = self.tree_contents(codex_home)
@@ -1027,8 +1027,8 @@ class ProviderConfigTest(unittest.TestCase):
                 with self.assertRaises((ValidationError, OSError)):
                     provider_config.apply_model_routing_update(
                         codex_home,
-                        "gpt-5.6-sol",
-                        "gpt-5.6-luna",
+                        "gpt-6.1-sol",
+                        "gpt-6-luna",
                     )
 
             self.assertTrue(swapped["done"])
@@ -1062,8 +1062,8 @@ class ProviderConfigTest(unittest.TestCase):
                 with self.assertRaises((ValidationError, OSError)):
                     provider_config.apply_model_routing_update(
                         codex_home,
-                        "gpt-5.6-sol",
-                        "gpt-5.6-luna",
+                        "gpt-6.1-sol",
+                        "gpt-6-luna",
                     )
 
             self.assertTrue(edited["done"])
@@ -1095,8 +1095,8 @@ class ProviderConfigTest(unittest.TestCase):
                 with self.assertRaises(OSError):
                     provider_config.apply_model_routing_update(
                         codex_home,
-                        "gpt-5.6-sol",
-                        "gpt-5.6-luna",
+                        "gpt-6.1-sol",
+                        "gpt-6-luna",
                     )
 
             self.assertEqual(target.read_bytes(), external_edit)
@@ -1605,8 +1605,8 @@ provider_config.apply_model_routing_update(home, "recovered-full", "recovered-li
 
             backups = provider_config.apply_model_routing_update(
                 codex_home,
-                "gpt-5.6-sol",
-                "gpt-5.6-luna",
+                "gpt-6.1-sol",
+                "gpt-6-luna",
             )
 
             self.assertTrue(broken_backup.is_symlink())
@@ -1628,8 +1628,8 @@ provider_config.apply_model_routing_update(home, "recovered-full", "recovered-li
             with self.assertRaises(ValidationError):
                 provider_config.plan_model_routing_update(
                     codex_home,
-                    "gpt-5.6-sol",
-                    "gpt-5.6-luna",
+                    "gpt-6.1-sol",
+                    "gpt-6-luna",
                 )
 
             self.assertEqual(self.tree_contents(outside_agents), outside_before)
@@ -1656,8 +1656,8 @@ provider_config.apply_model_routing_update(home, "recovered-full", "recovered-li
                 with self.assertRaisesRegex(ValidationError, "Python 3.11"):
                     provider_config.apply_model_routing_update(
                         codex_home,
-                        "gpt-5.6-sol",
-                        "gpt-5.6-luna",
+                        "gpt-6.1-sol",
+                        "gpt-6-luna",
                     )
 
             self.assertEqual(self.tree_contents(codex_home), before)
@@ -1692,8 +1692,8 @@ provider_config.apply_model_routing_update(home, "recovered-full", "recovered-li
                 with self.assertRaisesRegex(ValidationError, "changed"):
                     provider_config.apply_model_routing_update(
                         codex_home,
-                        "gpt-5.6-sol",
-                        "gpt-5.6-luna",
+                        "gpt-6.1-sol",
+                        "gpt-6-luna",
                     )
 
             self.assertEqual((codex_home / "config.toml").read_bytes(), config_before)
@@ -1743,8 +1743,8 @@ provider_config.apply_model_routing_update(home, "recovered-full", "recovered-li
                 with self.assertRaises((ValidationError, OSError)):
                     provider_config.apply_model_routing_update(
                         codex_home,
-                        "gpt-5.6-sol",
-                        "gpt-5.6-luna",
+                        "gpt-6.1-sol",
+                        "gpt-6-luna",
                     )
 
             self.assertTrue(swapped["done"])

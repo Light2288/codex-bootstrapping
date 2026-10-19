@@ -35,8 +35,8 @@
   },
   "model_routing": {
     "managed_models": {
-      "full": "gpt-5.6-sol",
-      "light": "gpt-5.6-luna"
+      "full": "gpt-6.1-sol",
+      "light": "gpt-6-luna"
     },
     "tiers": {
       "lite": {

@@ -14,8 +14,8 @@ def normalized(path):
 class AgentContractTest(unittest.TestCase):
     def test_review_agents_are_native_read_only_codex_profiles(self):
         expected_models = {
-            "review-spec": "gpt-5.6-luna",
-            "review-quality": "gpt-5.6-sol",
+            "review-spec": "gpt-6-luna",
+            "review-quality": "gpt-6.1-sol",
         }
 
         for name, model in expected_models.items():
@@ -212,7 +212,7 @@ class AgentContractTest(unittest.TestCase):
         data = tomllib.loads(path.read_text())
 
         self.assertEqual(data["name"], "review-audit")
-        self.assertEqual(data["model"], "gpt-5.6-sol")
+        self.assertEqual(data["model"], "gpt-6.1-sol")
         self.assertEqual(data["model_reasoning_effort"], "high")
         self.assertEqual(data["sandbox_mode"], "read-only")
         instructions = " ".join(data["developer_instructions"].lower().split())
@@ -262,7 +262,7 @@ class AgentContractTest(unittest.TestCase):
         data = tomllib.loads(path.read_text())
 
         self.assertEqual(data["name"], "document-worker")
-        self.assertEqual(data["model"], "gpt-5.6-sol")
+        self.assertEqual(data["model"], "gpt-6.1-sol")
         self.assertEqual(data["model_reasoning_effort"], "high")
         self.assertEqual(data["sandbox_mode"], "workspace-write")
 
@@ -364,7 +364,7 @@ class AgentContractTest(unittest.TestCase):
         data = tomllib.loads(path.read_text())
 
         self.assertEqual(data["name"], "doc-analyst")
-        self.assertEqual(data["model"], "gpt-5.6-sol")
+        self.assertEqual(data["model"], "gpt-6.1-sol")
         self.assertEqual(data["model_reasoning_effort"], "high")
         self.assertEqual(data["sandbox_mode"], "workspace-write")
         instructions = " ".join(data["developer_instructions"].lower().split())

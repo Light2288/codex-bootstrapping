@@ -73,13 +73,13 @@ fi
 provider_id="ibm_ica"
 display_name="IBM ICA"
 base_url="https://api.servicesessentials.ibm.com/v1"
-model="gpt-5.6-sol"
+model="gpt-6.1-sol"
 reasoning_effort="high"
 wire_api="responses"
 credential_env_var="IBM_ICA_CODEX_API_KEY"
 supports_websockets="false"
 auth_mode="keychain"
-light_model="gpt-5.6-luna"
+light_model="gpt-6-luna"
 
 prompt_default() {
   local label="$1"

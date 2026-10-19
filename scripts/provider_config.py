@@ -53,7 +53,7 @@ DEFAULT_SETTINGS = ProviderSettings(
     provider_id="ibm_ica",
     display_name="IBM ICA",
     base_url="https://api.servicesessentials.ibm.com/v1",
-    model="gpt-5.6-sol",
+    model="gpt-6.1-sol",
     reasoning_effort="high",
     wire_api="responses",
     credential_env_var="IBM_ICA_CODEX_API_KEY",
@@ -1888,8 +1888,8 @@ def main(argv=None):
     parser.add_argument("--supports-websockets", choices=("true", "false"), default="false")
     parser.add_argument("--auth-mode", choices=("keychain", "environment"), default="keychain")
     parser.add_argument("--models-only", action="store_true")
-    parser.add_argument("--full-model", default="gpt-5.6-sol")
-    parser.add_argument("--light-model", default="gpt-5.6-luna")
+    parser.add_argument("--full-model", default="gpt-6.1-sol")
+    parser.add_argument("--light-model", default="gpt-6-luna")
     parser.add_argument("--validate-provider-id")
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--dry-run", action="store_true")

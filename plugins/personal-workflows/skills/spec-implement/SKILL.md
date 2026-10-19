@@ -61,13 +61,13 @@ The full-only concerns are `ambiguous`, `borderline`, `security`, `auth`,
 tier and every conservative escalation.
 
 Resolve the exact model from the active personal-workflows managed model
-routing block. Its default role mapping is `light` = `gpt-5.6-luna` and
-`full` = `gpt-5.6-sol`, as recorded in the integration map. For
+routing block. Its default role mapping is `light` = `gpt-6-luna` and
+`full` = `gpt-6.1-sol`, as recorded in the integration map. For
 subagent-driven implementation, every eligible `lite` implementer dispatch
 must explicitly set the resolved `light` model; every `full` dispatch and
 every escalated or replacement implementer dispatch must explicitly set the
 resolved `full` model. With the shipped managed values, those exact dispatch
-models are `gpt-5.6-luna` and `gpt-5.6-sol`, respectively. Also pass the
+models are `gpt-6-luna` and `gpt-6.1-sol`, respectively. Also pass the
 reasoning effort selected under the base's Model Selection rules explicitly.
 Never omit either override and never claim a different exact model was
 selected.
@@ -92,7 +92,7 @@ The review route is independent of the implementation tier: `review-spec`
 performs specification adherence on the resolved configurable `light` role,
 then `review-quality` owns the final code-quality, security, and
 production-risk judgment on the resolved configurable `full` role. With the
-shipped defaults these are exactly `gpt-5.6-luna` and `gpt-5.6-sol`,
+shipped defaults these are exactly `gpt-6-luna` and `gpt-6.1-sol`,
 respectively. Never route the second-stage judgment to the light role.
 
 Only after that gate is passed or its findings are handled under the enclosing

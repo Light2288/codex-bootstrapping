@@ -9,8 +9,8 @@
 
 These owned values are the runtime model roles used by `spec-implement`:
 
-- `full`: `gpt-5.6-sol`
-- `light`: `gpt-5.6-luna`
+- `full`: `gpt-6.1-sol`
+- `light`: `gpt-6-luna`
 
 Only the marked personal-workflows block may manage these values. A light
 request remains subject to the workflow's eligibility and escalation gates.

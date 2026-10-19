@@ -14,7 +14,7 @@
       }
     ],
     "expected_tier": "lite",
-    "expected_implementation_model": "gpt-5.6-luna"
+    "expected_implementation_model": "gpt-6-luna"
   },
   {
     "name": "full subagent implementation",
@@ -31,7 +31,7 @@
       }
     ],
     "expected_tier": "full",
-    "expected_implementation_model": "gpt-5.6-sol"
+    "expected_implementation_model": "gpt-6.1-sol"
   },
   {
     "name": "lite escalates for a large task",
@@ -48,7 +48,7 @@
       }
     ],
     "expected_tier": "full",
-    "expected_implementation_model": "gpt-5.6-sol"
+    "expected_implementation_model": "gpt-6.1-sol"
   },
   {
     "name": "lite escalates for security work",
@@ -65,7 +65,7 @@
       }
     ],
     "expected_tier": "full",
-    "expected_implementation_model": "gpt-5.6-sol"
+    "expected_implementation_model": "gpt-6.1-sol"
   },
   {
     "name": "lite escalates when metadata is missing",
@@ -81,7 +81,7 @@
       }
     ],
     "expected_tier": "full",
-    "expected_implementation_model": "gpt-5.6-sol"
+    "expected_implementation_model": "gpt-6.1-sol"
   },
   {
     "name": "lite escalates for ambiguous work",
@@ -98,7 +98,7 @@
       }
     ],
     "expected_tier": "full",
-    "expected_implementation_model": "gpt-5.6-sol"
+    "expected_implementation_model": "gpt-6.1-sol"
   },
   {
     "name": "lite escalates for borderline work",
@@ -115,7 +115,7 @@
       }
     ],
     "expected_tier": "full",
-    "expected_implementation_model": "gpt-5.6-sol"
+    "expected_implementation_model": "gpt-6.1-sol"
   },
   {
     "name": "lite escalates for auth work",
@@ -132,7 +132,7 @@
       }
     ],
     "expected_tier": "full",
-    "expected_implementation_model": "gpt-5.6-sol"
+    "expected_implementation_model": "gpt-6.1-sol"
   },
   {
     "name": "lite escalates for data work",
@@ -149,7 +149,7 @@
       }
     ],
     "expected_tier": "full",
-    "expected_implementation_model": "gpt-5.6-sol"
+    "expected_implementation_model": "gpt-6.1-sol"
   },
   {
     "name": "lite escalates for migrations",
@@ -166,7 +166,7 @@
       }
     ],
     "expected_tier": "full",
-    "expected_implementation_model": "gpt-5.6-sol"
+    "expected_implementation_model": "gpt-6.1-sol"
   },
   {
     "name": "lite escalates for concurrency work",
@@ -183,7 +183,7 @@
       }
     ],
     "expected_tier": "full",
-    "expected_implementation_model": "gpt-5.6-sol"
+    "expected_implementation_model": "gpt-6.1-sol"
   },
   {
     "name": "lite escalates for performance work",
@@ -200,7 +200,7 @@
       }
     ],
     "expected_tier": "full",
-    "expected_implementation_model": "gpt-5.6-sol"
+    "expected_implementation_model": "gpt-6.1-sol"
   },
   {
     "name": "inline lite cannot switch the parent model",

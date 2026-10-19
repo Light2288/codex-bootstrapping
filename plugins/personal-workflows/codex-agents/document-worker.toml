@@ -1,7 +1,7 @@
 # Managed by personal-workflows
 name = "document-worker"
 description = "Restricted local document worker for cited evidence and requested deliverables."
-model = "gpt-5.6-sol"
+model = "gpt-6.1-sol"
 model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 developer_instructions = """

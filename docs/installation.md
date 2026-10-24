@@ -38,6 +38,14 @@ managed guidance block, and managed agents are idempotent. Existing managed
 files may receive collision-safe backups from the profile installer; unrelated
 agent files are never replaced.
 
+Fresh installs and updates place the mandatory approval stages, Git workflow,
+and interactive clarification rules inside the same managed guidance block.
+Supported custom full/light model assignments and text outside that block are
+preserved. Older manually copied workflow sections outside the markers are
+not migrated or removed automatically: back up `AGENTS.md`, compare those
+sections, and remove redundant copies manually while retaining unrelated or
+customized instructions. See [workflows](workflows.md) for the approval stages.
+
 To rotate a configured provider credential without changing `config.toml`, use
 `zsh scripts/configure-provider.zsh --credential-only`. To update the managed
 full/light routing after the profile is installed, use
@@ -75,7 +83,9 @@ python3 scripts/uninstall-profile.py --uninstall
 ```
 
 This leaves unrelated guidance and agents in place and refuses to delete an
-unmanaged agent sharing a managed filename. To remove the plugin or repository
+unmanaged agent sharing a managed filename. It removes the entire marked
+guidance block, including the mandatory approval, Git, and clarification rules;
+copies outside the block remain. To remove the plugin or repository
 marketplace itself, use the Codex plugin CLI after reviewing its current help:
 
 ```sh

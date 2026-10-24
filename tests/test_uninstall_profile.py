@@ -46,14 +46,17 @@ class UninstallProfileTest(unittest.TestCase):
             home = Path(directory) / "codex-home"
             self.install_profile(home)
             guidance = home / "AGENTS.md"
-            guidance.write_text("user guidance\n" + guidance.read_text(encoding="utf-8"), encoding="utf-8")
+            managed = guidance.read_text(encoding="utf-8")
+            self.assertIn("## Mandatory specification approval workflow", managed)
+            outside = "user guidance\n## Interactive clarification\nKeep my custom rules.\n"
+            guidance.write_text("user prefix\n" + managed + outside, encoding="utf-8")
             unrelated = home / "agents" / "custom.toml"
             unrelated.write_text("name = 'custom'\n", encoding="utf-8")
 
             result = self.run_uninstall(home, "--uninstall")
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(guidance.read_text(encoding="utf-8"), "user guidance\n")
+            self.assertEqual(guidance.read_text(encoding="utf-8"), "user prefix\n" + outside)
             self.assertTrue(unrelated.exists())
             self.assertEqual(list((home / "agents").glob("*.toml")), [unrelated])
             self.assertEqual(json.loads(result.stdout)["guidance"], "removed")

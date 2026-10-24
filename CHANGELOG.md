@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Distribute mandatory specification and implementation-plan approvals, Git
+  workflow, and interactive clarification as managed guidance defaults.
+  Preserve outside copies for manual consolidation and remove all managed
+  rules on profile uninstall.
 - Add deterministic full/light implementation model routing and the thin
   `$implement-lite` entry point while preserving the configurable full-role
   quality review gate (Sol by default).

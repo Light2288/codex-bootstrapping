@@ -162,7 +162,10 @@ class ProfileInstallerTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             report = json.loads(result.stdout)
             self.assertEqual(report["guidance"], "updated")
-            self.assertIn(START, (codex_home / "AGENTS.md").read_text())
+            self.assertEqual(
+                (codex_home / "AGENTS.md").read_text(),
+                (PLUGIN_ROOT / "profile" / "global-agents-block.md").read_text(),
+            )
             source_agents = sorted((PLUGIN_ROOT / "codex-agents").glob("*.toml"))
             self.assertEqual(
                 report["agents"],
@@ -173,6 +176,62 @@ class ProfileInstallerTest(unittest.TestCase):
                     (codex_home / "agents" / source.name).read_text(),
                     source.read_text(),
                 )
+
+    def test_upgrade_preserves_outside_guidance_and_models_without_repeat_backups(self):
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = Path(directory)
+            guidance = codex_home / "AGENTS.md"
+            original = (
+                "user prefix\n" + START + "\n## Managed model routing\n\n"
+                "- `full`: `custom-full`\n- `light`: `custom-light`\n"
+                "## Working agreements\n\nKeep project conventions.\n" + END
+                + "\nuser suffix\n"
+            )
+            guidance.write_text(original)
+            packaged = (PLUGIN_ROOT / "profile/global-agents-block.md").read_text()
+            expected = "user prefix\n" + packaged.replace(
+                "- `full`: `gpt-6.1-sol`", "- `full`: `custom-full`"
+            ).replace(
+                "- `light`: `gpt-6-luna`", "- `light`: `custom-light`"
+            ) + "user suffix\n"
+
+            check = install_profile(codex_home, PLUGIN_ROOT, check_only=True)
+            self.assertEqual(check["guidance"], "would-update")
+            self.assertEqual(guidance.read_text(), original)
+            self.assertEqual(list(codex_home.glob("*.backup.*")), [])
+
+            installed = install_profile(codex_home, PLUGIN_ROOT, check_only=False)
+            self.assertEqual(installed["guidance"], "updated")
+            self.assertEqual(guidance.read_text(), expected)
+            self.assertIn("### Stage 4: Implementation", guidance.read_text())
+            backups = list(codex_home.glob("AGENTS.md.backup.*"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_text(), original)
+            before = {p.relative_to(codex_home): p.read_bytes()
+                      for p in codex_home.rglob("*") if p.is_file()}
+            for check_only in (True, False):
+                report = install_profile(codex_home, PLUGIN_ROOT, check_only)
+                self.assertEqual(report["guidance"], "unchanged")
+                self.assertTrue(all(s == "unchanged" for s in report["agents"].values()))
+                self.assertEqual(
+                    {p.relative_to(codex_home): p.read_bytes()
+                     for p in codex_home.rglob("*") if p.is_file()}, before
+                )
+
+    def test_install_preserves_an_exact_workflow_copy_outside_its_block(self):
+        packaged = (PLUGIN_ROOT / "profile/global-agents-block.md").read_text()
+        outside = packaged.partition("## Mandatory specification approval workflow")[2]
+        outside = "## Mandatory specification approval workflow" + outside.split(END, 1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = Path(directory)
+            guidance = codex_home / "AGENTS.md"
+            suffix = "\nuser suffix\n" + outside
+            guidance.write_text("user prefix\n" + MANAGED + suffix)
+
+            install_profile(codex_home, PLUGIN_ROOT, check_only=False)
+
+            self.assertEqual(guidance.read_text(), "user prefix\n" + packaged + suffix)
+            self.assertEqual(guidance.read_text().count("## Mandatory specification approval workflow"), 2)
 
     def test_cli_rejects_install_and_check_together_without_writes(self):
         with tempfile.TemporaryDirectory() as directory:

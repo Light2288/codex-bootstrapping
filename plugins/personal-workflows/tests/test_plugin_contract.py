@@ -30,6 +30,48 @@ def execution_trace(route, tasks):
 
 
 class PluginContractTest(unittest.TestCase):
+    def test_managed_guidance_requires_separate_workflow_approvals(self):
+        guidance = (PLUGIN / "profile/global-agents-block.md").read_text()
+        start = "<!-- personal-workflows:start -->"
+        end = "<!-- personal-workflows:end -->"
+        self.assertEqual(guidance.count(start), 1)
+        self.assertEqual(guidance.count(end), 1)
+        managed = guidance.split(start, 1)[1].split(end, 1)[0]
+        headings = (
+            "## Personal workflow routing",
+            "## Managed model routing",
+            "## Working agreements",
+            "## Mandatory specification approval workflow",
+            "### Stage 1: Scope and design confirmation",
+            "### Stage 2: DRAFT specification",
+            "### Stage 3: Implementation plan",
+            "### Stage 4: Implementation",
+            "### Approval interpretation",
+            "### Handoffs and mode changes",
+            "## Spec-driven Git workflow",
+            "## Interactive clarification",
+        )
+        previous = -1
+        for heading in headings:
+            with self.subTest(heading=heading):
+                self.assertEqual(managed.splitlines().count(heading), 1)
+                position = managed.index(heading)
+                self.assertGreater(position, previous)
+                previous = position
+        wording = " ".join(managed.split())
+        for instruction in (
+            "Stop and wait for explicit specification approval.",
+            "Stop and wait for explicit plan approval.",
+            "Specification approval authorizes implementation planning only.",
+            "Never combine specification approval and plan approval into one gate.",
+            "Leaving Plan mode or accepting a generic implementation prompt does not waive missing gates.",
+            "If unavailable, do not draft the artifact.",
+            "Clarification answers resolve decisions. They do not replace scope, specification, or implementation-plan approval.",
+        ):
+            with self.subTest(instruction=instruction):
+                self.assertIn(instruction, wording)
+        self.assertTrue(guidance.rstrip().endswith(end))
+
     def test_managed_fallback_selects_present_superpowers_skill(self):
         guidance = " ".join(
             (PLUGIN / "profile/global-agents-block.md")

@@ -421,6 +421,26 @@ class BootstrapTest(unittest.TestCase):
             self.assertEqual(calls, [])
             self.assertIn("Guidance: drift", result.stdout)
 
+    def test_check_rejects_drift_in_mandatory_approval_rules(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            home = temporary / "codex-home"
+            self.install_complete_profile(home)
+            guidance = home / "AGENTS.md"
+            original = guidance.read_text(encoding="utf-8")
+            self.assertIn("- Stop and wait for explicit plan approval.", original)
+            guidance.write_text(
+                original.replace("- Stop and wait for explicit plan approval.",
+                                 "- Proceed without plan approval."),
+                encoding="utf-8",
+            )
+
+            result, calls, _ = self.run_bootstrap(temporary, "--check")
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertEqual(calls, [])
+            self.assertIn("Guidance: drift", result.stdout)
+
     def test_check_rejects_a_malformed_cached_manifest_without_invoking_codex(self):
         """Treating invalid cache JSON as absent could conceal a corrupt plugin installation."""
         with tempfile.TemporaryDirectory() as directory:

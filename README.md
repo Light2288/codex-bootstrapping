@@ -11,8 +11,9 @@ Superpowers.
 - Fourteen workflow skills and five managed Codex agent profiles: three
   read-only review agents and two document agents restricted to
   `workspace-write`.
-- A profile installer that adds only the plugin's marked guidance and managed
-  agents to a chosen Codex home.
+- A profile installer that adds the plugin's marked guidance, including
+  mandatory specification and plan approvals, and managed agents to a chosen
+  Codex home.
 - Public project, security, contribution, and workflow documentation.
 - A macOS bootstrap, repository verifier, and safe profile-uninstall helper.
 
@@ -103,6 +104,14 @@ python3 plugins/personal-workflows/scripts/install_profile.py \
 The profile installer is explicit: use `--install` only after reviewing the
 check-mode report. It preserves unrelated guidance and refuses to overwrite
 an unmanaged agent file.
+
+The managed defaults require scope confirmation, specification approval, and
+separate implementation-plan approval before implementation. Material
+clarification uses the native interactive control; when unavailable, the
+guidance asks you to enable Plan mode. Existing copies of these rules outside
+the marked block remain untouched and require manual consolidation. Profile
+uninstall removes all rules inside the block. See the
+[workflow guide](docs/workflows.md) for the approval stages and ownership rules.
 
 See [the workflow guide](docs/workflows.md) for the included skills and
 [troubleshooting](docs/troubleshooting.md) for recovery steps.

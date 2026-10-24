@@ -840,6 +840,7 @@ class ProviderConfigTest(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(initial_install.returncode, 0, initial_install.stderr)
+            original_guidance = (codex_home / "AGENTS.md").read_text(encoding="utf-8")
             (codex_home / "config.toml").write_text(
                 'model = "packaged-full"\nmodel_provider = "ibm_ica"\n',
                 encoding="utf-8",
@@ -865,6 +866,16 @@ class ProviderConfigTest(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(update.returncode, 0, (update.stdout, update.stderr))
+
+            expected_guidance = original_guidance.replace(
+                "- `full`: `gpt-6.1-sol`", "- `full`: `supported-full`"
+            ).replace(
+                "- `light`: `gpt-6-luna`", "- `light`: `supported-light`"
+            )
+            self.assertEqual(
+                (codex_home / "AGENTS.md").read_text(encoding="utf-8"),
+                expected_guidance,
+            )
 
             check = subprocess.run(
                 [
@@ -898,6 +909,10 @@ class ProviderConfigTest(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(reinstall.returncode, 0, reinstall.stderr)
+            self.assertEqual(
+                (codex_home / "AGENTS.md").read_text(encoding="utf-8"),
+                expected_guidance,
+            )
             self.assertIn(
                 "- `full`: `supported-full`",
                 (codex_home / "AGENTS.md").read_text(encoding="utf-8"),

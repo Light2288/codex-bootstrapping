@@ -91,12 +91,12 @@ The full tier reflects the live-file data risk in Task 2. Native execution retai
 
 **Interfaces:** Consume Task 1's verified template. Perform a one-time local operation; do not add a migration utility or run the full profile installer against the live home.
 
-- [ ] **Prepare and inspect the local transformation.** Read the current global file, validate its markers, and identify the exact previously supplied outside rules. Render the template with its active model selections. Preserve unrelated prefix and suffix text. Stop rather than remove ambiguous or customized outside instructions.
-- [ ] **Validate without changing live state.** Confirm the prepared result contains one managed block and one copy of each workflow section, with the expected model selections and unrelated text. Exercise backup-name collisions and preservation checks using temporary files.
-- [ ] **Back up and replace.** Confirm the source has not changed since inspection. Create a collision-safe sibling backup using exclusive creation, preserve file permissions, and replace the global file atomically. Do not modify other live Codex files.
-- [ ] **Verify local alignment.** Read the result back and compare it with the prepared content. Verify the backup matches the original bytes and record the backup path. Do not include the backup in Git.
-- [ ] **Complete the required integrated review.** Use `personal-workflows:code-review` for the sequential specification and quality review of the complete branch, including verification evidence and local-alignment evidence. Resolve supported findings within the execution workflow; rerun affected checks after changes.
-- [ ] **Finish without pushing or merging.** Commit any review corrections or final artifact updates, verify repository status, and report the implementation commit, test results, global-file alignment, and backup location.
+- [x] **Prepare and inspect the local transformation.** Read the current global file, validate its markers, and identify the exact previously supplied outside rules. Render the template with its active model selections. Preserve unrelated prefix and suffix text. Stop rather than remove ambiguous or customized outside instructions.
+- [x] **Validate without changing live state.** Confirm the prepared result contains one managed block and one copy of each workflow section, with the expected model selections and unrelated text. Exercise backup-name collisions and preservation checks using temporary files.
+- [x] **Back up and replace.** Confirm the source has not changed since inspection. Create a collision-safe sibling backup using exclusive creation, preserve file permissions, and replace the global file atomically. Do not modify other live Codex files.
+- [x] **Verify local alignment.** Read the result back and compare it with the prepared content. Verify the backup matches the original bytes and record the backup path. Do not include the backup in Git.
+- [x] **Complete the required integrated review.** Use `personal-workflows:code-review` for the sequential specification and quality review of the complete branch, including verification evidence and local-alignment evidence. Resolve supported findings within the execution workflow; rerun affected checks after changes.
+- [x] **Finish without pushing or merging.** Commit any review corrections or final artifact updates, verify repository status, and report the implementation commit, test results, global-file alignment, and backup location.
 
 ## Acceptance Traceability and Handoff
 
@@ -108,3 +108,13 @@ The full tier reflects the live-file data risk in Task 2. Native execution retai
 | AC-10 | Documentation, repository verifier, and final sequential review |
 
 The user approved this plan separately from the specification. Implementation is authorized in Default mode. All material choices are resolved; no further clarification round is planned.
+
+## Completion Evidence
+
+- Implemented on `chore/managed-approval-workflow`; no push or merge performed.
+- `python3 -m unittest discover -s tests -v`: 81 tests passed.
+- `python3 -m unittest discover -s plugins/personal-workflows/tests -v`: 71 tests passed after the observed missing-workflow RED run.
+- `zsh scripts/verify.zsh`: passed, including shell, manifests, contract checks, and secret scanning.
+- The packaged template exactly matches the supplied text after relocating its end marker and adding the final newline.
+- The global guidance was consolidated, verified against the template, and backed up before atomic replacement; model assignments and permissions were preserved.
+- Integrated final review: SPEC REVIEW: PASS, followed by QUALITY REVIEW: PASS with Findings: NONE.

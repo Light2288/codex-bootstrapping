@@ -12,8 +12,8 @@ Superpowers.
   read-only review agents and two document agents restricted to
   `workspace-write`.
 - A profile installer that adds the plugin's marked guidance, including
-  mandatory specification and plan approvals, and managed agents to a chosen
-  Codex home.
+  mandatory specification and plan approvals and shared artifact naming, and
+  managed agents to a chosen Codex home.
 - Public project, security, contribution, and workflow documentation.
 - A macOS bootstrap, repository verifier, and safe profile-uninstall helper.
 
@@ -69,6 +69,11 @@ assignments survive profile checks and bootstrap reinstalls.
 
 Re-run the bootstrap after pulling updates. It is idempotent: it does not add
 duplicate marketplace registrations, agent files, or guidance blocks.
+
+New specifications and plans share a `YYYY-MM-DD-<slug>.md` basename using
+the specification's original creation date, with separate document dates.
+Existing filenames remain valid. Resume work in another chat by slug or an
+explicit artifact path; see [workflow naming and resumption](docs/workflows.md#specification-and-plan-names).
 
 Run the repository's no-user-state verifier with:
 

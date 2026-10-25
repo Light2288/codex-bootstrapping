@@ -38,13 +38,23 @@ managed guidance block, and managed agents are idempotent. Existing managed
 files may receive collision-safe backups from the profile installer; unrelated
 agent files are never replaced.
 
-Fresh installs and updates place the mandatory approval stages, Git workflow,
-and interactive clarification rules inside the same managed guidance block.
+Fresh installs and updates place the mandatory approval stages, paired
+specification/plan naming, Git workflow, and interactive clarification rules
+inside the same managed guidance block.
 Supported custom full/light model assignments and text outside that block are
 preserved. Older manually copied workflow sections outside the markers are
 not migrated or removed automatically: back up `AGENTS.md`, compare those
 sections, and remove redundant copies manually while retaining unrelated or
 customized instructions. See [workflows](workflows.md) for the approval stages.
+
+New artifact pairs share a `YYYY-MM-DD-<slug>.md` basename based on the
+specification's original creation date. Updates distribute this default
+through the marked guidance; they do not rename existing specifications or
+plans. Existing pairs remain discoverable through Slug metadata and Spec
+references, and missing plans inherit their specification's historical
+basename. See [artifact naming and resumption](workflows.md#specification-and-plan-names).
+Repository edits alone do not refresh an already installed plugin cache;
+follow the normal update/bootstrap process when deploying the revised skills.
 
 To rotate a configured provider credential without changing `config.toml`, use
 `zsh scripts/configure-provider.zsh --credential-only`. To update the managed
@@ -84,7 +94,7 @@ python3 scripts/uninstall-profile.py --uninstall
 
 This leaves unrelated guidance and agents in place and refuses to delete an
 unmanaged agent sharing a managed filename. It removes the entire marked
-guidance block, including the mandatory approval, Git, and clarification rules;
+guidance block, including the mandatory approval, naming, Git, and clarification rules;
 copies outside the block remain. To remove the plugin or repository
 marketplace itself, use the Codex plugin CLI after reviewing its current help:
 

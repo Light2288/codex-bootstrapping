@@ -51,6 +51,40 @@ requested. Keep specification and plan changes uncommitted until that branch
 exists, then implement, verify, and commit there. Push or merge only when
 requested.
 
+## Specification and plan names
+
+New pairs share one basename in separate folders:
+
+```text
+docs/superpowers/specs/2026-10-25-example.md
+docs/superpowers/plans/2026-10-25-example.md
+```
+
+Both filenames use the specification's original creation date, without the
+old `-design` suffix. A plan written on October 28 still uses October 25 in
+its filename. Its own `Created` and initial `Updated` fields are October 28;
+the specification's Created remains October 25. Later revisions preserve
+filenames and known Created values and change Updated to the edit date.
+Missing historical dates are never invented.
+
+Both artifacts record the same `Slug`; the plan's explicit `Spec` path or
+link identifies its specification. In a later chat, say
+`Resume paired-artifact-naming` or
+`Plan from docs/superpowers/specs/2026-10-25-paired-artifact-naming.md`.
+The workflow resolves both artifacts and their approval evidence before
+resuming the appropriate stage. A relative Spec link resolves from the plan's
+directory; plain `docs/superpowers/specs/...` and `specs/...` paths are relative
+to the repository root, as in older plans. Conflicting identity, dates, or
+destination names require clarification before writing.
+
+Existing names and references remain valid and are not renamed automatically.
+An existing plan with a different name is found through metadata and reused.
+If an older specification has no plan, its new plan copies the specification's
+exact basename, including a historical `-design` suffix. Legacy `specs/` and
+`plans/` sources remain read-only; revisions go to the Superpowers locations
+with provenance. See the [artifact-resolution contract](../plugins/personal-workflows/references/artifact-resolution.md)
+for lookup and conflict safeguards.
+
 ## Guidance ownership and updates
 
 The complete workflow is inside `<!-- personal-workflows:start -->` and

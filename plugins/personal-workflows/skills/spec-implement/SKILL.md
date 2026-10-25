@@ -35,6 +35,13 @@ Before selecting a specification or plan, read
 and apply it independently to both artifacts using the same slug. Require the
 specification and plan to be approved for implementation. Legacy artifacts are
 read-only sources; stop on `CONFLICT` or a missing required artifact.
+Accept a slug or explicit artifact path for later-chat resumption and validate
+the selected pair under the shared contract, including the plan's `**Spec:**`
+reference and any Slug metadata. Historical names may differ; do not rename
+them or create a replacement plan merely to match the specification's name.
+When updating artifacts, preserve their basenames and known `**Created:**`
+values and change `**Updated:**` on edits. Do not invent missing historical
+dates or use lookup success as approval evidence.
 
 Choose the execution method from an explicit current user or planning-handoff
 choice when present; that choice is authoritative. Otherwise use the approved

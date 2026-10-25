@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Give new specification/plan pairs the same basename and stable specification
+  creation date, with document-specific Created/Updated metadata. Preserve
+  historical filenames and lookup, support later-chat resumption by slug or
+  path, and distribute the convention through managed guidance.
 - Distribute mandatory specification and implementation-plan approvals, Git
   workflow, and interactive clarification as managed guidance defaults.
   Preserve outside copies for manual consolidation and remove all managed

@@ -32,6 +32,21 @@ Before selecting a spec or existing plan, read
 [`../../references/artifact-resolution.md`](../../references/artifact-resolution.md)
 and apply it. Legacy artifacts remain read-only; new plans and revisions use
 the Superpowers location and record `Slug` and `Provenance` metadata.
+Resolve the specification and any existing plan before selecting a new path.
+A missing plan uses the selected specification's exact basename, including
+historical suffixes, in `docs/superpowers/plans/`. A later planning date does
+not change that basename; reuse an existing plan even when its name differs.
+
+Add these metadata fields without removing the base header:
+
+- `**Slug:**` for the shared exact slug.
+- `**Spec:**` with an explicit path or link to the selected specification.
+- `**Created:** YYYY-MM-DD` for this plan's actual creation date.
+- `**Updated:** YYYY-MM-DD` for its latest edit, initially equal to Created.
+
+Preserve known Created and update Updated on revisions. Validate the pair and
+any requested destination under the shared contract; report conflicts before
+writing. Do not infer approval from successful artifact lookup.
 
 ## Personal planning delta
 

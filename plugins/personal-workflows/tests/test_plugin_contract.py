@@ -48,6 +48,7 @@ class PluginContractTest(unittest.TestCase):
             "### Stage 4: Implementation",
             "### Approval interpretation",
             "### Handoffs and mode changes",
+            "## Specification and plan naming",
             "## Spec-driven Git workflow",
             "## Interactive clarification",
         )
@@ -219,6 +220,35 @@ class PluginContractTest(unittest.TestCase):
                 "conflicting-non-user-sources": "stop-before-loading-either",
             },
         )
+
+    def test_artifact_resolution_requires_paired_names_and_document_dates(self):
+        reference = (PLUGIN / "references/artifact-resolution.md").read_text()
+        self.assertIn("docs/superpowers/specs/YYYY-MM-DD-<slug>.md", reference)
+        self.assertIn("docs/superpowers/plans/YYYY-MM-DD-<slug>.md", reference)
+        self.assertNotIn("YYYY-MM-DD-<topic>-design.md", reference)
+        for field in ("**Created:**", "**Updated:**", "**Spec:**"):
+            with self.subTest(field=field):
+                self.assertIn(field, reference)
+        normalized = " ".join(reference.split())
+        for requirement in (
+            r"(?i)specification's original creation date",
+            r"(?i)exact basename.*historical suffixes",
+            r"(?i)preserve.*Created.*Updated",
+            r"(?i)never invent.*historical dates",
+            r"(?i)contradictory.*(?:identity|metadata)",
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertRegex(normalized, requirement)
+
+    def test_delivery_adapters_expose_pairing_metadata(self):
+        for name in ("spec-define", "spec-plan", "spec-implement"):
+            with self.subTest(adapter=name):
+                adapter = (PLUGIN / "skills" / name / "SKILL.md").read_text()
+                self.assertIn("../../references/artifact-resolution.md", adapter)
+                for field in ("**Created:**", "**Updated:**"):
+                    self.assertIn(field, adapter)
+                if name != "spec-define":
+                    self.assertIn("**Spec:**", adapter)
 
     def test_artifact_resolution_defines_safe_outcomes(self):
         reference_path = PLUGIN / "references/artifact-resolution.md"

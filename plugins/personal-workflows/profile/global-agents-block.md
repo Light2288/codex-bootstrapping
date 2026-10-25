@@ -120,6 +120,22 @@ mode change needed to save it. Do not claim that an unsaved file exists.
 A mode change does not change the workflow stage or authorize work
 beyond the approvals already given.
 
+## Specification and plan naming
+
+- New specification/plan pairs use the same `YYYY-MM-DD-<slug>.md` basename
+  in `docs/superpowers/specs/` and `docs/superpowers/plans/`; omit `-design`
+  for new specifications.
+- Use the specification's original creation date in both filenames, even
+  when planning happens later. Revisions keep the filenames stable.
+- Each new document records its own `Created` and `Updated` dates. Preserve
+  known Created and update Updated on edits; never invent historical dates.
+- Keep shared `Slug` metadata and an explicit `Spec` reference in the plan.
+  Resume in another chat by slug or explicit artifact path; use the shared
+  artifact-resolution contract and report conflicting evidence before writing.
+- Preserve existing filenames and references. A missing plan for an older
+  specification reuses that specification's exact basename, including any
+  historical suffix. Legacy sources remain read-only.
+
 ## Spec-driven Git workflow
 
 1. Do not update `main` or create the implementation branch until the

@@ -39,6 +39,10 @@ Before locating, revising, or writing a spec, read
 [`../../references/artifact-resolution.md`](../../references/artifact-resolution.md)
 and apply it. Legacy specs are read-only; every new spec or revision uses the
 Superpowers path and records its source in provenance.
+Use the shared naming contract: a new specification is
+`docs/superpowers/specs/YYYY-MM-DD-<slug>.md` without `-design`, using its
+original creation date. Preserve its basename on later revisions and report
+the path and slug at the approval handoff so a later chat can locate it.
 
 Add these metadata lines without removing base content:
 
@@ -46,6 +50,11 @@ Add these metadata lines without removing base content:
 - `**Type:** feature | bug | refactor | chore`.
 - `**Status:** DRAFT | APPROVED`, reflecting the current base approval gate.
 - `**Provenance:** <request and any normalized source paths>`.
+- `**Created:** YYYY-MM-DD` for this document's actual creation date.
+- `**Updated:** YYYY-MM-DD` for its latest edit, initially equal to Created.
+
+Preserve known Created and change Updated on revisions. Apply the shared
+contract's historical-date and legacy-revision rules; never invent old dates.
 
 Give every acceptance criterion a stable, sequential ID: `AC-01`, `AC-02`,
 and so on. Criteria must be concrete and verifiable.

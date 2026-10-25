@@ -218,6 +218,51 @@ class ProfileInstallerTest(unittest.TestCase):
                      for p in codex_home.rglob("*") if p.is_file()}, before
                 )
 
+    def test_naming_guidance_upgrade_preserves_models_and_outside_text(self):
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = Path(directory)
+            guidance = codex_home / "AGENTS.md"
+            packaged = (PLUGIN_ROOT / "profile/global-agents-block.md").read_text()
+            old = (
+                "user prefix\n" + START + "\n## Managed model routing\n\n"
+                "- `full`: `custom-full`\n- `light`: `custom-light`\n"
+                "## Working agreements\n\nKeep project conventions.\n" + END
+                + "\nuser suffix\n"
+            )
+            guidance.write_text(old)
+            expected = "user prefix\n" + packaged.replace(
+                "- `full`: `gpt-6.1-sol`", "- `full`: `custom-full`"
+            ).replace(
+                "- `light`: `gpt-6-luna`", "- `light`: `custom-light`"
+            ) + "user suffix\n"
+
+            report = install_profile(codex_home, PLUGIN_ROOT, check_only=True)
+            self.assertEqual(report["guidance"], "would-update")
+            self.assertEqual(guidance.read_text(), old)
+            self.assertEqual(list(codex_home.rglob("*.backup.*")), [])
+            self.assertFalse((codex_home / "agents").exists())
+
+            install_profile(codex_home, PLUGIN_ROOT, check_only=False)
+            installed = guidance.read_text()
+            self.assertEqual(installed, expected)
+            managed = installed.split(START, 1)[1].split(END, 1)[0]
+            self.assertEqual(managed.count("## Specification and plan naming"), 1)
+            self.assertIn("YYYY-MM-DD-<slug>.md", managed)
+            backups = list(codex_home.glob("AGENTS.md.backup.*"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_text(), old)
+            before = {p.relative_to(codex_home): p.read_bytes()
+                      for p in codex_home.rglob("*") if p.is_file()}
+            for check_only in (True, False):
+                self.assertEqual(
+                    install_profile(codex_home, PLUGIN_ROOT, check_only)["guidance"],
+                    "unchanged",
+                )
+                self.assertEqual(
+                    {p.relative_to(codex_home): p.read_bytes()
+                     for p in codex_home.rglob("*") if p.is_file()}, before
+                )
+
     def test_install_preserves_an_exact_workflow_copy_outside_its_block(self):
         packaged = (PLUGIN_ROOT / "profile/global-agents-block.md").read_text()
         outside = packaged.partition("## Mandatory specification approval workflow")[2]

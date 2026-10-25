@@ -66,8 +66,12 @@ Newly authored documents include:
 - `**Created:** YYYY-MM-DD` for that document's actual creation date.
 - `**Updated:** YYYY-MM-DD` for its latest edit date, initially equal to Created.
 - Plans also require `**Spec:**` with an explicit path or Markdown link to the
-  selected specification. Resolve relative references from the plan's parent
-  directory; normalize the result relative to the repository root.
+  selected specification. Plain paths beginning `docs/superpowers/specs/` or
+  `specs/` are repository-relative, including backtick-wrapped values in older
+  plans. Relative Markdown link destinations and explicit `./` or `../` paths
+  resolve from the plan's parent directory; absolute paths are used directly.
+  Normalize the result relative to the repository root. If another spelling
+  has multiple plausible bases, report `CONFLICT` rather than guessing.
 
 Preserve known Created on revisions and change Updated on edits. Each document
 has its own dates: a plan created later has a later Created while its filename

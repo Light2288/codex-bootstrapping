@@ -73,8 +73,9 @@ link identifies its specification. In a later chat, say
 `Plan from docs/superpowers/specs/2026-10-25-paired-artifact-naming.md`.
 The workflow resolves both artifacts and their approval evidence before
 resuming the appropriate stage. A relative Spec link resolves from the plan's
-directory. Conflicting identity, dates, or destination names require
-clarification before writing.
+directory; plain `docs/superpowers/specs/...` and `specs/...` paths are relative
+to the repository root, as in older plans. Conflicting identity, dates, or
+destination names require clarification before writing.
 
 Existing names and references remain valid and are not renamed automatically.
 An existing plan with a different name is found through metadata and reused.

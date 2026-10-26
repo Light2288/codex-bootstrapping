@@ -124,6 +124,8 @@ Do not introduce dependencies, installation flags, a reusable evaluation platfor
 
 The eventual handoff will describe the supported bootstrap checks, explicitly authorized update procedure, post-update verification, and loading of revised instructions. It will not execute that rollout.
 
-**Current stage:** Stage 4 — implementation. The specification and separate
-implementation plan were independently approved and saved before product edits.
-Installation rollout remains a later, explicitly authorized step.
+**Current stage:** Stage 4 completed. The specification and separate plan
+were independently approved and saved before product edits. The increment
+passed repository verification and the sequential specification/quality review.
+Installation rollout remains a later, explicitly authorized step; evidence
+and limitations are recorded in the implementation plan.

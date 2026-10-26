@@ -122,10 +122,10 @@ Each condition is covered by the behavioral cases below; distribution preservati
 
 ### Final review and handoff
 
-- [ ] **Invoke `personal-workflows:code-review` once in integrated mode** as the sole final whole-branch review seat. Supply the approved artifacts, complete diff/file list, Review Focus, deterministic results, behavioral observations, and limitations. Follow its immutable-package identity checks and sequential specification-then-quality gate using the configured light/full roles.
-- [ ] **Handle supported findings under the Native base's review policy.** Verify affected corrections and record rulings or deferred findings. Do not add a parallel generic final reviewer.
-- [ ] **Record completion evidence and commit it** with `chore: record delivery scope verification`. Confirm the local branch and repository status.
-- [ ] **Present the result and stop.** Report commits, changed behavior, deterministic verification, observed behavioral results, limitations, and implications. Include the later rollout procedure: review the intended revision; run bootstrap check/dry-run; after separate authorization run bootstrap, verify installation health, and start a chat that loads the revised guidance. Explain that repository edits or a profile-only refresh do not by themselves refresh installed skill content. Do not perform rollout.
+- [x] **Invoke `personal-workflows:code-review` once in integrated mode** as the sole final whole-branch review seat. Supply the approved artifacts, complete diff/file list, Review Focus, deterministic results, behavioral observations, and limitations. Follow its immutable-package identity checks and sequential specification-then-quality gate using the configured light/full roles.
+- [x] **Handle supported findings under the Native base's review policy.** Verify affected corrections and record rulings or deferred findings. Do not add a parallel generic final reviewer.
+- [x] **Record completion evidence and commit it** with `chore: record delivery scope verification`. Confirm the local branch and repository status.
+- [x] **Present the result and stop.** Report commits, changed behavior, deterministic verification, observed behavioral results, limitations, and implications. Include the later rollout procedure: review the intended revision; run bootstrap check/dry-run; after separate authorization run bootstrap, verify installation health, and start a chat that loads the revised guidance. Explain that repository edits or a profile-only refresh do not by themselves refresh installed skill content. Do not perform rollout.
 
 ## Acceptance traceability and approval handoff
 
@@ -139,10 +139,10 @@ Each condition is covered by the behavioral cases below; distribution preservati
 | AC-11 | Separately reported deterministic results and observed behavioral evidence; full verifier |
 | AC-12 | Approval/branch preparation, repository-only edits, integrated review, local commits, explicit endpoint |
 
-**Current stage:** Stage 4 — implementation. The user separately approved the
-specification and this plan. Both artifacts are saved before product edits.
-The existing specification approval remains valid; installation rollout is
-not authorized.
+**Current stage:** Stage 4 completed. The user separately approved the
+specification and this plan; both were saved before product edits. The increment
+is verified, reviewed and committed locally. Installation rollout remains
+a later, explicitly authorized step; no subsequent increment has begun.
 
 
 ## Implementation evidence
@@ -314,3 +314,47 @@ sample count to nineteen fresh contexts, including targeted correction runs.
 No claim of statistical improvement or consistent real-project compliance is
 made. The sequential gate resumes at specification review for the corrected
 state before quality can begin; this is the same integrated final review seat.
+
+
+### Final sequential review and handoff
+
+The corrected state passed both stages of the same integrated final seat:
+
+- `SPEC REVIEW: PASS`: complete 14-file boundary matches the approved scope;
+  AC-02 correction and its RED/GREEN/targeted evidence accepted; no extra scope.
+- `QUALITY REVIEW: PASS`, `Findings: NONE`: no supported quality, security,
+  data-integrity or maintainability defect. The reviewer used packaged evidence
+  and did not rerun tests.
+- Both validated and echoed GATE_RUN_ID
+  `9581251e-7919-4b15-b3cf-0967dbc1ea2e`, REVIEWED_STATE_ID
+  `86adc6454c8763c0597c70b2f150680d613697da`, and PACKAGE_SHA256
+  `5c867bb31b6d6e1580e143d679316f005d2fdbde52ca07a6723f9b71f60caeef`.
+  The immutable package hash was checked again before recording these results.
+- Latest full verification of the final instruction/test source: exit 0,
+  82 repository tests plus 77 plugin tests (159 total), both `OK`, and
+  `Repository verification passed.` Final evidence/lifecycle edits do not
+  change the instruction/test source or the specification's policy block.
+- Rulings: none. Deferred minors: none. The one acceptance miss was corrected
+  within the approved scope; no substantive policy or plan change was adopted.
+
+Local commits before this evidence-only handoff are `e090e8d` (approved
+artifacts), `406f857` (integration), and `86adc64` (explicit endpoint correction).
+The final evidence commit uses `chore: record delivery scope verification`.
+Keep branch `chore/delivery-scope` local in the existing checkout. No worktree,
+push, merge, dependency installation, cache edit, live profile update, or later
+increment was performed.
+
+The result is a repository implementation ready for separately authorized
+rollout. After reviewing/selecting the intended revision, use the supported
+procedure in [installation](../../installation.md): repository verification;
+bootstrap `--check` and `--dry-run`; after explicit authorization, bootstrap
+installation; then healthy bootstrap `--check`, installed-skill inspection,
+and a new chat to load the instructions. Older guidance can legitimately
+report drift before rollout. A profile-only refresh does not refresh skill
+content. These instructions document the later action; they do not perform or
+authorize it.
+
+Future live use may reveal further wording refinements. The nineteen synthetic
+consumers and deterministic distribution checks provide distinct evidence;
+they do not prove consistent live agent behavior. Stop here rather than
+starting that refinement or rollout scope automatically.

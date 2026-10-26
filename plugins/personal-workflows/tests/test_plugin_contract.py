@@ -63,6 +63,8 @@ class PluginContractTest(unittest.TestCase):
                 for term in terms:
                     self.assertIn(term, wording)
                 self.assertIn("existing approved", wording)
+                if name == "spec-define":
+                    self.assertIn("Execution endpoint:", adapter)
 
     def test_managed_guidance_requires_separate_workflow_approvals(self):
         guidance = (PLUGIN / "profile/global-agents-block.md").read_text()

@@ -264,3 +264,53 @@ observations do not prove reliable compliance, statistical improvement, or
 live installed-skill behavior. They support the proposed instruction shape,
 while the distribution tests independently prove the policy reaches the
 managed installation surfaces.
+
+
+### Integrated review: specification correction
+
+The first specification review returned `SPEC REVIEW: MISSING` for AC-02,
+based on the recorded revised_4 proposal omission. It verified package identity:
+
+- GATE_RUN_ID: `90fedc0e-a90a-4f5c-bcc5-e9ad56c71030`
+- REVIEWED_STATE_ID: `406f857040bbc57d2278881f1ef4368a0af3316f`
+- PACKAGE_SHA256: `6b42674d5617baa906a1a83bc54f96771eebb3933c4227d72925f676414d32b6`
+
+The reviewer found no extra scope or other supported criterion failures.
+Quality review was not dispatched on that non-PASS. The located remedy was a
+proposal endpoint presence check in spec-define. The one correction pass adds
+a required `Execution endpoint:` output line and checks it before presenting
+new proposals. The authoritative policy, approvals and historical artifacts
+remain unchanged.
+
+The new adapter-slot contract failed RED (77 plugin tests, one assertion
+failure, no errors) before the guidance changed. After correction,
+`zsh scripts/verify.zsh` exited 0: 82 repository tests, 77 plugin tests, `OK`,
+and `Repository verification passed.`
+
+Five additional fresh consumers (`endpoint_fix_1` through `endpoint_fix_5`)
+used the same model/effort and fork settings. Each received the corrected
+snapshot and only the affected new-project case, rather than the original
+six-case bundle; the case facts and neutral decision request were unchanged.
+All five included an explicit execution endpoint covering the working
+outcome, verification/review, a report and stopping before later work.
+Formatting and report-detail variation remain: endpoint_fix_2 put approval
+sequencing after the endpoint, and endpoint_fix_5 did not explicitly name
+implications in its endpoint. These samples establish the observed endpoint
+correction, not universal adherence to every output detail.
+
+- Corrected instruction SHA-256: `d291b48b36f91d45cfb56b6821904cb88b124fcc978fe11beddd5c422fcb261b`
+- Affected-case SHA-256: `f1e0c94026a087e1e25ffeb0fa36a414e3315b8c43c3a65408a4dbfe09de9c3b`
+
+| Sample | Actual endpoint excerpt |
+|---|---|
+| endpoint_fix_1 | “finish the approved intake-and-extraction outcome, verification and review, report evidence, limitations and implications for later capabilities, then stop” |
+| endpoint_fix_2 | “deliver the approved intake/extraction outcome, complete verification and review, report evidence, limitations and implications, then stop before later work” |
+| endpoint_fix_3 | “deliver working intake and inspectable extraction, complete verification and review, report evidence, limitations and implications for later work, then stop before another increment” |
+| endpoint_fix_4 | “complete the approved intake-to-extraction outcome, verification and review, report demonstrated results, accuracy evidence, limitations and implications for later work” |
+| endpoint_fix_5 | “complete the approved intake-to-extraction outcome, verification and review, report evidence and limitations, and stop before specifying or implementing later capabilities” |
+
+The original omissions remain recorded above. This brings the behavioral
+sample count to nineteen fresh contexts, including targeted correction runs.
+No claim of statistical improvement or consistent real-project compliance is
+made. The sequential gate resumes at specification review for the corrected
+state before quality can begin; this is the same integrated final review seat.

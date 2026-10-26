@@ -44,6 +44,10 @@ specification. Keep later increments provisional. Use the shared prompt recipe
 when generating project-start prompts or handoffs, preserving the actual
 approval stage and the stop after completing the increment.
 
+End each new scope/design proposal with an explicit `Execution endpoint:` line
+naming the working outcome, verification/review, result report, and stop before
+later work. Check that line is present before presenting the proposal.
+
 Existing approved artifacts and authorization remain usable without new fields,
 automatic splitting, or retrospective approvals. Propose scope changes
 explicitly through the existing gates.

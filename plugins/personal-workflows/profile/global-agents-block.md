@@ -23,6 +23,48 @@ request remains subject to the workflow's eligibility and escalation gates.
 - Remove dead code and follow the nearest project conventions.
 - Keep progress updates concise and distinguish verified evidence from inference.
 
+## Delivery scope
+
+- For new projects and substantial extensions, distinguish the overall
+  project/release direction from the next delivery increment.
+
+- During scope/design confirmation, propose the smallest coherent increment
+  that produces an independently demonstrable or verifiable outcome.
+  State what it delivers, what uncertainty it resolves, what remains
+  deferred, and where execution will stop.
+
+- Prefer an end-to-end outcome over separate technical layers. Include
+  necessary setup, integration, tests, documentation, and safeguards in
+  that increment. A focused fix or chore may already be one increment.
+
+- If later work could reasonably change after evaluating an earlier
+  outcome, put it in a later increment. Keep later increments provisional;
+  do not write their detailed specifications and plans upfront.
+
+- By default, create one specification/plan pair for the selected increment.
+  A project roadmap, release target, or list of future capabilities does
+  not authorize their implementation.
+
+- A broader delivery scope is permitted when splitting would undermine
+  correctness or create disproportionate overhead. Explain the tradeoff
+  and make that broader scope explicit during scope/design confirmation.
+
+- Complete the approved increment autonomously, including its verification
+  and review. Then present the working result, evidence, limitations, and
+  implications for subsequent work, and stop. Do not automatically begin
+  another increment's specification, plan, or implementation.
+
+- Apply the existing approval stages to each subsequent increment.
+  Do not add approval gates between ordinary implementation tasks.
+
+- Project-start prompts and handoffs must preserve this distinction:
+  describe the wider direction, but identify the first increment as the
+  immediate scope.
+
+- Preserve existing approved artifacts and authorization. Propose any
+  change to their scope explicitly; do not silently split, invalidate,
+  or rewrite them.
+
 ## Mandatory specification approval workflow
 
 Apply this workflow to every implementation request, including features,

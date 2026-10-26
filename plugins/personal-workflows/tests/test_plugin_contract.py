@@ -30,6 +30,42 @@ def execution_trace(route, tasks):
 
 
 class PluginContractTest(unittest.TestCase):
+    def test_delivery_scope_policy_matches_approved_specification(self):
+        """A truncated or rewritten distributed policy must fail its copy contract."""
+        spec = (PLUGIN.parents[1] / "docs/superpowers/specs/2026-10-26-delivery-scope.md").read_text()
+        expected = spec.split("## Delivery scope policy\n", 1)[1].split(
+            "## Integration design", 1
+        )[0]
+        expected = expected[expected.index("- For new projects"):].strip()
+        guidance = (PLUGIN / "profile/global-agents-block.md").read_text()
+        managed = guidance.split("<!-- personal-workflows:start -->", 1)[1].split(
+            "<!-- personal-workflows:end -->", 1
+        )[0]
+        self.assertEqual(managed.count("## Delivery scope\n"), 1)
+        actual = managed.partition("## Delivery scope\n")[2].split("\n## ", 1)[0]
+        self.assertEqual(actual.strip(), expected)
+
+    def test_delivery_adapters_expose_increment_boundaries(self):
+        """Distribution/link contracts; consumer behavior is evaluated separately."""
+        required = {
+            "spec-define": ("selected increment", "uncertainty", "deferred work", "boundary rationale", "execution endpoint"),
+            "spec-plan": ("approved scope", "execution endpoint", "provisional"),
+            "spec-implement": ("working result", "observed evidence", "limitations", "implications", "stop"),
+        }
+        for name, terms in required.items():
+            with self.subTest(adapter=name):
+                path = PLUGIN / "skills" / name / "SKILL.md"
+                adapter = path.read_text()
+                reference = "../../references/delivery-scope.md"
+                self.assertIn(reference, adapter)
+                self.assertTrue((path.parent / reference).is_file())
+                wording = " ".join(adapter.lower().split())
+                for term in terms:
+                    self.assertIn(term, wording)
+                self.assertIn("existing approved", wording)
+                if name == "spec-define":
+                    self.assertIn("Execution endpoint:", adapter)
+
     def test_managed_guidance_requires_separate_workflow_approvals(self):
         guidance = (PLUGIN / "profile/global-agents-block.md").read_text()
         start = "<!-- personal-workflows:start -->"

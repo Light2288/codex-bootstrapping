@@ -421,6 +421,29 @@ class BootstrapTest(unittest.TestCase):
             self.assertEqual(calls, [])
             self.assertIn("Guidance: drift", result.stdout)
 
+    def test_check_rejects_drift_in_delivery_scope_policy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            home = temporary / "codex-home"
+            self.install_complete_profile(home)
+            guidance = home / "AGENTS.md"
+            original = guidance.read_text(encoding="utf-8")
+            heading = "## Delivery scope\n"
+            self.assertEqual(original.count(heading), 1)
+            before, _, remainder = original.partition(heading)
+            _, separator, following = remainder.partition("\n## ")
+            guidance.write_text(before + separator.lstrip("\n") + following, encoding="utf-8")
+            snapshot = {p.relative_to(home): p.read_bytes()
+                        for p in home.rglob("*") if p.is_file()}
+
+            result, calls, _ = self.run_bootstrap(temporary, "--check")
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertEqual(calls, [])
+            self.assertIn("Guidance: drift", result.stdout)
+            self.assertEqual({p.relative_to(home): p.read_bytes()
+                              for p in home.rglob("*") if p.is_file()}, snapshot)
+
     def test_check_rejects_drift_in_mandatory_approval_rules(self):
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)

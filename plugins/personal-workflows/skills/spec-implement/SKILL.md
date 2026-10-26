@@ -85,6 +85,19 @@ savings or that the parent is running the managed tier model. Continue with
 the selected inline base unchanged. Do not install or simulate legacy
 implementer agents.
 
+## Delivery scope and completion
+
+Apply [`../../references/delivery-scope.md`](../../references/delivery-scope.md).
+Execute the approved increment autonomously through its verification, review,
+and authorized branch finishing. Ordinary implementation tasks gain no new
+approval gates. Existing approved artifacts keep their authorized scope even
+without increment fields; do not split them or require retrospective approval.
+
+At the execution endpoint, report the working result, observed evidence,
+limitations, and implications for subsequent work, then stop. Later roadmap
+items remain provisional: do not begin another increment's specification,
+plan, or implementation automatically. Preserve pending integration permissions.
+
 ## Personal final-review postcondition
 
 Preserve the selected base's task loop. In particular, subagent-driven

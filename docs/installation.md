@@ -56,6 +56,32 @@ basename. See [artifact naming and resumption](workflows.md#specification-and-pl
 Repository edits alone do not refresh an already installed plugin cache;
 follow the normal update/bootstrap process when deploying the revised skills.
 
+Updates also distribute the delivery-scope policy through the managed block
+and its guidance through the revised delivery skills. Existing approved
+specifications and plans remain usable at their authorized scope, including
+artifacts without increment fields. No migration, splitting, renaming, metadata
+backfill, or retrospective approval is required. See
+[delivery scoping](workflows.md#delivery-scoping).
+
+For a later, explicitly authorized rollout of a repository change:
+
+1. Review and safely select the intended repository revision. Repository
+   verification (`zsh scripts/verify.zsh`) can run before touching an installation.
+2. Run `zsh scripts/bootstrap-macos.zsh --check` and
+   `zsh scripts/bootstrap-macos.zsh --dry-run`. An older managed block may
+   correctly report drift and a nonzero check status; review the proposed update.
+3. After authorization, run `zsh scripts/bootstrap-macos.zsh` and confirm its
+   installation prompts. This uses the supported plugin installation process
+   and then the profile installer; do not manually edit installed caches.
+4. Run `zsh scripts/bootstrap-macos.zsh --check` again and require healthy
+   plugin/profile reports. Confirm the installed delivery skills contain the
+   revised guidance as well as the managed policy. Start a new Codex chat to
+   load the updated instructions.
+
+A profile-only `install_profile.py --install` refreshes global guidance and
+managed agents, not installed skill content. Keep rollout separate from
+repository development; documented commands are not authorization to run it.
+
 To rotate a configured provider credential without changing `config.toml`, use
 `zsh scripts/configure-provider.zsh --credential-only`. To update the managed
 full/light routing after the profile is installed, use

@@ -33,6 +33,21 @@ When this skill was invoked to create a written specification, write it after
 the selected base path's design gate even if that path would normally keep a
 bounded design in chat. Do not add a second conversation or approval workflow.
 
+## Delivery scope
+
+Before scope/design confirmation, apply
+[`../../references/delivery-scope.md`](../../references/delivery-scope.md).
+Distinguish wider direction from the selected increment. Record its outcome,
+uncertainty, necessary setup/integration/tests/documentation/safeguards,
+deferred work, boundary rationale, and execution endpoint in the proposal and
+specification. Keep later increments provisional. Use the shared prompt recipe
+when generating project-start prompts or handoffs, preserving the actual
+approval stage and the stop after completing the increment.
+
+Existing approved artifacts and authorization remain usable without new fields,
+automatic splitting, or retrospective approvals. Propose scope changes
+explicitly through the existing gates.
+
 ## Personal specification delta
 
 Before locating, revising, or writing a spec, read

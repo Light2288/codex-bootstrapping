@@ -166,6 +166,9 @@ class ProfileInstallerTest(unittest.TestCase):
                 (codex_home / "AGENTS.md").read_text(),
                 (PLUGIN_ROOT / "profile" / "global-agents-block.md").read_text(),
             )
+            installed = (codex_home / "AGENTS.md").read_text()
+            self.assertEqual(installed.count("## Delivery scope\n"), 1)
+            self.assertIn("A project roadmap, release target, or list of future capabilities", installed)
             source_agents = sorted((PLUGIN_ROOT / "codex-agents").glob("*.toml"))
             self.assertEqual(
                 report["agents"],
@@ -176,6 +179,51 @@ class ProfileInstallerTest(unittest.TestCase):
                     (codex_home / "agents" / source.name).read_text(),
                     source.read_text(),
                 )
+
+    def test_delivery_scope_upgrade_preserves_models_and_outside_text(self):
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = Path(directory)
+            guidance = codex_home / "AGENTS.md"
+            packaged = (PLUGIN_ROOT / "profile/global-agents-block.md").read_text()
+            spec = (PLUGIN_ROOT.parents[1] / "docs/superpowers/specs/2026-10-26-delivery-scope.md").read_text()
+            policy = spec.split("## Delivery scope policy\n", 1)[1].split("## Integration design", 1)[0]
+            policy = policy[policy.index("- For new projects"):].strip()
+            section = "## Delivery scope\n\n" + policy + "\n\n"
+            expected = "prefix\n" + packaged.replace(
+                "- `full`: `gpt-6.1-sol`", "- `full`: `custom-full`"
+            ).replace("- `light`: `gpt-6-luna`", "- `light`: `custom-light`") + "suffix\n"
+            original = expected.replace(section, "")
+            guidance.write_text(original)
+            unrelated = codex_home / "agents" / "unrelated.toml"
+            unrelated.parent.mkdir()
+            unrelated.write_text('name = "unrelated"\nmodel = "keep-me"\n')
+            before = {p.relative_to(codex_home): p.read_bytes()
+                      for p in codex_home.rglob("*") if p.is_file()}
+
+            checked = install_profile(codex_home, PLUGIN_ROOT, check_only=True)
+            self.assertEqual(checked["guidance"], "would-update")
+            self.assertEqual({p.relative_to(codex_home): p.read_bytes()
+                              for p in codex_home.rglob("*") if p.is_file()}, before)
+            installed = install_profile(codex_home, PLUGIN_ROOT, check_only=False)
+            self.assertEqual(installed["guidance"], "updated")
+            self.assertEqual(guidance.read_text(), expected)
+            self.assertIn(section, guidance.read_text())
+            self.assertEqual(guidance.read_text().count("## Delivery scope\n"), 1)
+            self.assertEqual(unrelated.read_bytes(), before[Path("agents/unrelated.toml")])
+            backups = list(codex_home.glob("AGENTS.md.backup.*"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_bytes(), before[Path("AGENTS.md")])
+            for filename, model in (("review-spec.toml", "custom-light"),
+                                    ("review-quality.toml", "custom-full")):
+                self.assertIn(f'model = "{model}"', (unrelated.parent / filename).read_text())
+            after = {p.relative_to(codex_home): p.read_bytes()
+                     for p in codex_home.rglob("*") if p.is_file()}
+            for check_only in (True, False):
+                report = install_profile(codex_home, PLUGIN_ROOT, check_only)
+                self.assertEqual(report["guidance"], "unchanged")
+                self.assertTrue(all(status == "unchanged" for status in report["agents"].values()))
+                self.assertEqual({p.relative_to(codex_home): p.read_bytes()
+                                  for p in codex_home.rglob("*") if p.is_file()}, after)
 
     def test_upgrade_preserves_outside_guidance_and_models_without_repeat_backups(self):
         with tempfile.TemporaryDirectory() as directory:

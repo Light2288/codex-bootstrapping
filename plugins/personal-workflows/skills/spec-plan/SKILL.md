@@ -48,6 +48,16 @@ Preserve known Created and update Updated on revisions. Validate the pair and
 any requested destination under the shared contract; report conflicts before
 writing. Do not infer approval from successful artifact lookup.
 
+## Delivery scope
+
+Apply [`../../references/delivery-scope.md`](../../references/delivery-scope.md).
+Keep task decomposition and verification within the approved scope, including
+necessary safeguards, and state the execution endpoint. Keep later increments
+provisional; a roadmap does not authorize tasks or detailed future plans.
+Existing approved specifications and plans remain usable without new fields,
+automatic splitting, or retrospective approvals. Propose scope changes
+explicitly through the existing gates.
+
 ## Personal planning delta
 
 Keep every field in the Superpowers plan header and its checkbox task format.

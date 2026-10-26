@@ -4,15 +4,16 @@
 **Type:** chore
 **Status:** APPROVED
 **Created:** 2026-10-26
-**Updated:** 2026-10-26
+**Updated:** 2026-10-27
 **Provenance:** User's delivery-scoping request, subsequent "Scope/design confirmed; continue", and explicit approval of the separately presented specification in this chat.
 **Approval evidence:** The user confirmed scope/design with "Scope/design confirmed; continue". The DRAFT specification was then presented separately and approved by the message beginning "PLEASE IMPLEMENT THIS PLAN:" that reproduces it. This approves implementation planning only; a separate implementation plan and its explicit approval remain required.
 
 This specification was first drafted unsaved in Plan mode on 2026-10-26 and
 saved after specification approval in Default mode on the same date. Initial
 artifact resolution found no existing specification or plan for this slug.
-The builder check found no material unanswered questions. No implementation
-plan has been created.
+The builder check found no material unanswered questions. The separately
+presented implementation plan was subsequently approved and saved at
+`docs/superpowers/plans/2026-10-26-delivery-scope.md`.
 
 ## Problem, outcome, and boundary
 
@@ -123,9 +124,6 @@ Do not introduce dependencies, installation flags, a reusable evaluation platfor
 
 The eventual handoff will describe the supported bootstrap checks, explicitly authorized update procedure, post-update verification, and loading of revised instructions. It will not execute that rollout.
 
-**Current stage:** Stage 3 — implementation planning. The specification is
-saved and approved.
-
-**Pending approval:** A separate implementation plan must be presented and
-receive explicit approval. Both approved artifacts must be saved before
-implementation begins; leaving Plan mode does not supply either approval.
+**Current stage:** Stage 4 — implementation. The specification and separate
+implementation plan were independently approved and saved before product edits.
+Installation rollout remains a later, explicitly authorized step.

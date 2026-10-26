@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Distribute delivery-scope guidance that separates release direction from the
+  next coherent working increment, preserves autonomous execution inside its
+  approved boundary, and stops after verification, review, and reporting.
+  Preserve existing approvals; document project-start prompts and later rollout.
+
 - Give new specification/plan pairs the same basename and stable specification
   creation date, with document-specific Created/Updated metadata. Preserve
   historical filenames and lookup, support later-chat resumption by slug or

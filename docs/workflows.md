@@ -51,6 +51,59 @@ requested. Keep specification and plan changes uncommitted until that branch
 exists, then implement, verify, and commit there. Push or merge only when
 requested.
 
+## Delivery scoping
+
+For new projects and substantial extensions, distinguish release direction
+from the next coherent delivery increment during scope/design confirmation.
+Describe its working outcome, uncertainty to resolve, deferred capabilities,
+necessary safeguards, boundary rationale, and execution endpoint. The
+[managed policy](../plugins/personal-workflows/profile/global-agents-block.md)
+owns the rules; the [shared guidance](../plugins/personal-workflows/references/delivery-scope.md)
+provides decision examples and prompt/report structures.
+
+Prefer a usable end-to-end result. A document workbench might first let users
+import a PDF and inspect extracted text before search or report design depends
+on extraction quality. A focused README correction can already be one
+increment. A serialization-format change can reasonably include readers,
+writers, and compatibility together when splitting would create unreadable data.
+Explain a broader scope's correctness or overhead tradeoff at confirmation.
+
+By default, one specification/plan pair covers the selected increment. Keep
+future increments provisional. Execute ordinary tasks autonomously within the
+approved plan, including necessary tests, documentation, safeguards, and review;
+there are no extra approvals between those tasks. Then report the working
+result, observed evidence, limitations, and implications, and stop. Another
+increment goes through the existing approval stages.
+
+Existing approved specifications and plans retain their scope and authorization,
+including broader releases and artifacts without increment fields. Updates do
+not rename, split, invalidate, backfill, or require retrospective approvals.
+Any proposed scope change is explicit and follows the existing gates.
+
+When asking for a project-start prompt for another chat, keep its wider direction
+and immediate scope distinct. For example:
+
+```text
+I want a local document workbench. The wider release direction includes PDF
+intake, text extraction, search, saved collections, and reports.
+
+Propose the first increment as PDF intake through inspectable text extraction,
+so I can evaluate extraction accuracy before committing to downstream features.
+Preserve originals, show failures, and include necessary setup, integration,
+tests, documentation, and safeguards. Search, collections, and reports remain
+provisional and deferred.
+
+No scope/design, specification, or plan approval exists. Inspect the repository
+and propose scope/design for confirmation first, then follow the separate
+specification and implementation-plan approval gates. Once an increment is
+approved, complete it through verification and review, report its result,
+evidence, limitations, and implications, then stop before subsequent work.
+```
+
+Adapt the approval state to actual evidence when handing off approved work.
+A generated prompt does not authorize a whole release. In-place continuation
+is also supported; neither a new chat nor a roadmap artifact is required.
+
 ## Specification and plan names
 
 New pairs share one basename in separate folders:

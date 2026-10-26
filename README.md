@@ -118,6 +118,14 @@ the marked block remain untouched and require manual consolidation. Profile
 uninstall removes all rules inside the block. See the
 [workflow guide](docs/workflows.md) for the approval stages and ownership rules.
 
+For new projects and substantial extensions, scope the next coherent working
+increment separately from the wider release direction. Include its necessary
+verification, review, documentation, and safeguards, then report the result
+and stop before subsequent work. Focused fixes can already be one increment;
+correctness can justify a broader scope. Existing approved artifacts and
+authorization remain valid. See [delivery scoping](docs/workflows.md#delivery-scoping)
+for examples and a project-start prompt.
+
 See [the workflow guide](docs/workflows.md) for the included skills and
 [troubleshooting](docs/troubleshooting.md) for recovery steps.
 
